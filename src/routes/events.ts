@@ -40,8 +40,8 @@ router.post(
         event: {
           eventId: event.eventId,
           eventName: event.eventName,
-          county: event.county,
-          constituency: event.constituency,
+          county: event.county || 'UDA HQ',
+          constituency: event.county ? event.constituency : 'HUSTLER PLAZA',
           ward: event.ward,
           createdBy: req.user!.id,
           createdAt: event.createdAt,
@@ -94,8 +94,8 @@ router.get(
         events: events.map((event) => ({
           eventId: event.eventId,
           eventName: event.eventName,
-          county: event.county,
-          constituency: event.constituency,
+          county: event.county || 'UDA HQ',
+          constituency: event.county ? event.constituency : 'HUSTLER PLAZA',
           ward: event.ward,
           createdBy: {
             id: event.createdBy.id,
@@ -154,8 +154,8 @@ router.get(
         event: {
           eventId: event.eventId,
           eventName: event.eventName,
-          county: event.county,
-          constituency: event.constituency,
+          county: event.county || 'UDA HQ',
+          constituency: event.county ? event.constituency : 'HUSTLER PLAZA',
           ward: event.ward,
           createdBy: {
             id: event.createdBy.id,

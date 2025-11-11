@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { AppDataSource } from '../config/database';
 import { Event } from '../entities/Event';
+import { UserRole } from '../entities/User';
 import { authenticate, AuthRequest, requireAdmin } from '../middleware/auth';
 import logger from '../config/logger';
 
@@ -63,11 +64,30 @@ router.get(
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const eventRepository = AppDataSource.getRepository(Event);
+      let events: Event[];
 
-      const events = await eventRepository.find({
-        relations: ['createdBy'],
-        order: { createdAt: 'DESC' },
-      });
+      if (req.user!.role === UserRole.ADMIN) {
+        // Admins see only events they created
+        events = await eventRepository.find({
+          where: { createdById: req.user!.id },
+          relations: ['createdBy'],
+          order: { createdAt: 'DESC' },
+        });
+      } else {
+        // Users see only events created by their admin
+        if (!req.user!.adminId) {
+          res.status(403).json({
+            message: 'User is not assigned to an admin',
+          });
+          return;
+        }
+
+        events = await eventRepository.find({
+          where: { createdById: req.user!.adminId },
+          relations: ['createdBy'],
+          order: { createdAt: 'DESC' },
+        });
+      }
 
       res.json({
         message: 'Events retrieved successfully',
@@ -116,6 +136,19 @@ router.get(
         return;
       }
 
+      // Check access permissions
+      if (req.user!.role === UserRole.ADMIN) {
+        if (event.createdById !== req.user!.id) {
+          res.status(403).json({ message: 'Access denied' });
+          return;
+        }
+      } else {
+        if (!req.user!.adminId || event.createdById !== req.user!.adminId) {
+          res.status(403).json({ message: 'Access denied' });
+          return;
+        }
+      }
+
       res.json({
         message: 'Event retrieved successfully',
         event: {
@@ -135,6 +168,52 @@ router.get(
       });
     } catch (error) {
       logger.error('Get event error:', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+);
+
+// Delete event (Admin only)
+router.delete(
+  '/:eventId',
+  authenticate,
+  requireAdmin,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { eventId } = req.params;
+
+      const eventRepository = AppDataSource.getRepository(Event);
+
+      const event = await eventRepository.findOne({
+        where: { eventId },
+      });
+
+      if (!event) {
+        res.status(404).json({ message: 'Event not found' });
+        return;
+      }
+
+      // Only allow admin to delete their own events
+      if (event.createdById !== req.user!.id) {
+        res.status(403).json({ message: 'Access denied. You can only delete events you created.' });
+        return;
+      }
+
+      await eventRepository.remove(event);
+
+      logger.info('Event deleted successfully', {
+        eventId,
+        deletedBy: req.user!.id,
+      });
+
+      res.json({
+        message: 'Event deleted successfully',
+      });
+    } catch (error) {
+      logger.error('Delete event error:', {
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
       });

@@ -5,10 +5,12 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
 } from 'typeorm';
 import { User } from './User';
 import { Event } from './Event';
+import { CheckInLog } from './CheckInLog';
 
 @Entity('participants')
 export class Participant {
@@ -39,16 +41,6 @@ export class Participant {
   @Column({ type: 'varchar', length: 255, nullable: true })
   pollingCenter: string | null;
 
-  @Column({ type: 'smallint', default: 0 })
-  checkedIn: number; // 1 for checked in, 0 for not checked in
-
-  @Column({ type: 'uuid' })
-  checkedInById: string;
-
-  @ManyToOne(() => User, (user) => user.participants)
-  @JoinColumn({ name: 'checkedInById' })
-  checkedInBy: User;
-
   @Column({ type: 'uuid' })
   eventId: string;
 
@@ -56,8 +48,8 @@ export class Participant {
   @JoinColumn({ name: 'eventId' })
   event: Event;
 
-  @Column({ type: 'timestamp', nullable: true })
-  checkedInAt: Date | null;
+  @OneToMany(() => CheckInLog, (checkInLog) => checkInLog.participant)
+  checkInLogs: CheckInLog[];
 
   @CreateDateColumn()
   createdAt: Date;

@@ -5,6 +5,8 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
 import { Event } from './Event';
 import { Participant } from './Participant';
@@ -37,6 +39,16 @@ export class User {
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   refreshToken: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  adminId: string | null;
+
+  @ManyToOne(() => User, (user) => user.users, { nullable: true })
+  @JoinColumn({ name: 'adminId' })
+  admin: User | null;
+
+  @OneToMany(() => User, (user) => user.admin)
+  users: User[];
 
   @CreateDateColumn()
   createdAt: Date;

@@ -25,10 +25,26 @@ app.use(cookieParser());
 
 // CORS middleware
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', env.FRONTEND_URL);
+  const origin = req.headers.origin;
+  
+  // In development, allow localhost:3000 and localhost:3001
+  // In production, use the configured FRONTEND_URL
+  const allowedOrigins = env.NODE_ENV === 'development'
+    ? ['http://localhost:3000', 'http://localhost:3001']
+    : [env.FRONTEND_URL];
+  
+  // Check if the origin is allowed
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+  } else if (env.NODE_ENV === 'development' && !origin) {
+    // Allow requests without origin header in development (e.g., Postman, curl)
+    // Note: Cannot use credentials with wildcard origin
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+  
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.header('Access-Control-Allow-Credentials', 'true');
   
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);

@@ -2,6 +2,7 @@ import { DataSource } from 'typeorm';
 import { User } from '../entities/User';
 import { Event } from '../entities/Event';
 import { Participant } from '../entities/Participant';
+import { CheckInLog } from '../entities/CheckInLog';
 import { env } from './env';
 import logger from './logger';
 
@@ -28,7 +29,7 @@ const dbConfig = {
   synchronize: true,
   // synchronize: env.NODE_ENV !== 'production',
   logging: env.NODE_ENV === 'development',
-  entities: [User, Event, Participant],
+  entities: [User, Event, Participant, CheckInLog],
   migrations: ['src/migrations/**/*.ts'],
   subscribers: ['src/subscribers/**/*.ts'],
   ssl,

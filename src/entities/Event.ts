@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { User } from './User';
 import { Participant } from './Participant';
+import { CheckInLog } from './CheckInLog';
 
 @Entity('events')
 export class Event {
@@ -43,5 +44,8 @@ export class Event {
 
   @OneToMany(() => Participant, (participant) => participant.event)
   participants: Participant[];
+
+  @OneToMany(() => CheckInLog, (checkInLog) => checkInLog.event)
+  checkInLogs: CheckInLog[];
 }
 

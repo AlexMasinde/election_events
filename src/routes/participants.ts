@@ -2,11 +2,25 @@ import { Router, Response } from 'express';
 import { AppDataSource } from '../config/database';
 import { Event } from '../entities/Event';
 import { Participant } from '../entities/Participant';
+import { CheckInLog } from '../entities/CheckInLog';
+import { User, UserRole } from '../entities/User';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { lookupVoter } from '../services/voterLookup';
 import logger from '../config/logger';
 
 const router = Router();
+
+// Helper function to check event access
+async function checkEventAccess(
+  event: Event,
+  user: User
+): Promise<boolean> {
+  if (user.role === UserRole.ADMIN) {
+    return event.createdById === user.id;
+  } else {
+    return user.adminId !== null && event.createdById === user.adminId;
+  }
+}
 
 // Search participant (voter lookup)
 router.post(
@@ -31,6 +45,12 @@ router.post(
 
       if (!event) {
         res.status(404).json({ message: 'Event not found' });
+        return;
+      }
+
+      // Check event access
+      if (!(await checkEventAccess(event, req.user!))) {
+        res.status(403).json({ message: 'Access denied to this event' });
         return;
       }
 
@@ -129,78 +149,92 @@ router.post(
         return;
       }
 
-      // Check if participant already checked in for this event
+      // Check event access
+      if (!(await checkEventAccess(event, req.user!))) {
+        res.status(403).json({ message: 'Access denied to this event' });
+        return;
+      }
+
       const participantRepository = AppDataSource.getRepository(Participant);
-      const existingParticipant = await participantRepository.findOne({
+      const checkInLogRepository = AppDataSource.getRepository(CheckInLog);
+
+      // Find or create participant
+      let participant = await participantRepository.findOne({
         where: {
           eventId,
           idNumber,
         },
       });
 
-      if (existingParticipant && existingParticipant.checkedIn === 1) {
+      if (!participant) {
+        // Create new participant
+        participant = participantRepository.create({
+          eventId,
+          idNumber,
+          name,
+          dateOfBirth: new Date(dateOfBirth),
+          sex,
+          county: county || null,
+          constituency: constituency || null,
+          ward: ward || null,
+          pollingCenter: pollingCenter || null,
+        });
+        await participantRepository.save(participant);
+      } else {
+        // Update participant info (in case it changed)
+        participant.name = name;
+        participant.dateOfBirth = new Date(dateOfBirth);
+        participant.sex = sex;
+        participant.county = county || null;
+        participant.constituency = constituency || null;
+        participant.ward = ward || null;
+        participant.pollingCenter = pollingCenter || null;
+        await participantRepository.save(participant);
+      }
+
+      // Check if already checked in today
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const existingCheckIn = await checkInLogRepository.findOne({
+        where: {
+          participantId: participant.id,
+          eventId,
+          checkInDate: today,
+        },
+      });
+
+      if (existingCheckIn) {
         res.status(400).json({
-          message: 'Participant already checked in for this event',
+          message: 'Voter already checked in today',
         });
         return;
       }
 
-      if (existingParticipant) {
-        // Update existing participant
-        existingParticipant.checkedIn = 1;
-        existingParticipant.checkedInAt = new Date();
-        existingParticipant.checkedInById = req.user!.id;
-        existingParticipant.name = name;
-        existingParticipant.dateOfBirth = new Date(dateOfBirth);
-        existingParticipant.sex = sex;
-        existingParticipant.county = county || null;
-        existingParticipant.constituency = constituency || null;
-        existingParticipant.ward = ward || null;
-        existingParticipant.pollingCenter = pollingCenter || null;
-
-        await participantRepository.save(existingParticipant);
-
-        res.json({
-          message: 'Participant checked in successfully',
-          participant: {
-            id: existingParticipant.id,
-            idNumber: existingParticipant.idNumber,
-            name: existingParticipant.name,
-            checkedIn: existingParticipant.checkedIn,
-            checkedInAt: existingParticipant.checkedInAt,
-            eventId: existingParticipant.eventId,
-          },
-        });
-        return;
-      }
-
-      // Create new participant
-      const participant = participantRepository.create({
+      // Create check-in log
+      const checkInLog = checkInLogRepository.create({
+        participantId: participant.id,
         eventId,
-        idNumber,
-        name,
-        dateOfBirth: new Date(dateOfBirth),
-        sex,
-        county: county || null,
-        constituency: constituency || null,
-        ward: ward || null,
-        pollingCenter: pollingCenter || null,
-        checkedIn: 1,
         checkedInById: req.user!.id,
+        checkInDate: today,
         checkedInAt: new Date(),
       });
 
-      await participantRepository.save(participant);
+      await checkInLogRepository.save(checkInLog);
 
       res.status(201).json({
         message: 'Participant checked in successfully',
+        checkIn: {
+          id: checkInLog.id,
+          participantId: participant.id,
+          eventId,
+          checkInDate: checkInLog.checkInDate,
+          checkedInAt: checkInLog.checkedInAt,
+        },
         participant: {
           id: participant.id,
           idNumber: participant.idNumber,
           name: participant.name,
-          checkedIn: participant.checkedIn,
-          checkedInAt: participant.checkedInAt,
-          eventId: participant.eventId,
         },
       });
     } catch (error) {
@@ -232,11 +266,17 @@ router.get(
         return;
       }
 
+      // Check event access
+      if (!(await checkEventAccess(event, req.user!))) {
+        res.status(403).json({ message: 'Access denied to this event' });
+        return;
+      }
+
       const participantRepository = AppDataSource.getRepository(Participant);
       const participants = await participantRepository.find({
         where: { eventId },
-        relations: ['checkedInBy', 'event'],
-        order: { checkedInAt: 'DESC' },
+        relations: ['checkInLogs', 'checkInLogs.checkedInBy', 'event'],
+        order: { createdAt: 'DESC' },
       });
 
       res.json({
@@ -251,14 +291,19 @@ router.get(
           constituency: participant.constituency,
           ward: participant.ward,
           pollingCenter: participant.pollingCenter,
-          checkedIn: participant.checkedIn,
-          checkedInBy: {
-            id: participant.checkedInBy.id,
-            name: participant.checkedInBy.name,
-            email: participant.checkedInBy.email,
-          },
-          checkedInAt: participant.checkedInAt,
+          checkInLogs: participant.checkInLogs.map((log) => ({
+            id: log.id,
+            checkInDate: log.checkInDate,
+            checkedInAt: log.checkedInAt,
+            checkedInBy: {
+              id: log.checkedInBy.id,
+              name: log.checkedInBy.name,
+              email: log.checkedInBy.email,
+            },
+          })),
+          totalCheckIns: participant.checkInLogs.length,
           eventId: participant.eventId,
+          createdAt: participant.createdAt,
         })),
       });
     } catch (error) {
@@ -271,5 +316,83 @@ router.get(
   }
 );
 
-export default router;
+// Get participants checked in on a specific date
+router.get(
+  '/event/:eventId/date/:date',
+  authenticate,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { eventId, date } = req.params;
 
+      // Verify event exists
+      const eventRepository = AppDataSource.getRepository(Event);
+      const event = await eventRepository.findOne({
+        where: { eventId },
+      });
+
+      if (!event) {
+        res.status(404).json({ message: 'Event not found' });
+        return;
+      }
+
+      // Check event access
+      if (!(await checkEventAccess(event, req.user!))) {
+        res.status(403).json({ message: 'Access denied to this event' });
+        return;
+      }
+
+      // Parse date (format: YYYY-MM-DD)
+      const targetDate = new Date(date);
+      if (isNaN(targetDate.getTime())) {
+        res.status(400).json({ message: 'Invalid date format. Use YYYY-MM-DD' });
+        return;
+      }
+      targetDate.setHours(0, 0, 0, 0);
+
+      const checkInLogRepository = AppDataSource.getRepository(CheckInLog);
+      const checkInLogs = await checkInLogRepository.find({
+        where: {
+          eventId,
+          checkInDate: targetDate,
+        },
+        relations: ['participant', 'checkedInBy'],
+        order: { checkedInAt: 'DESC' },
+      });
+
+      res.json({
+        message: 'Participants retrieved successfully',
+        date: date,
+        count: checkInLogs.length,
+        participants: checkInLogs.map((log) => ({
+          checkInId: log.id,
+          checkInDate: log.checkInDate,
+          checkedInAt: log.checkedInAt,
+          participant: {
+            id: log.participant.id,
+            idNumber: log.participant.idNumber,
+            name: log.participant.name,
+            dateOfBirth: log.participant.dateOfBirth,
+            sex: log.participant.sex,
+            county: log.participant.county,
+            constituency: log.participant.constituency,
+            ward: log.participant.ward,
+            pollingCenter: log.participant.pollingCenter,
+          },
+          checkedInBy: {
+            id: log.checkedInBy.id,
+            name: log.checkedInBy.name,
+            email: log.checkedInBy.email,
+          },
+        })),
+      });
+    } catch (error) {
+      logger.error('Get participants by date error:', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+);
+
+export default router;

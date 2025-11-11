@@ -38,6 +38,14 @@ const envSchema = Joi.object({
   
   // CORS
   FRONTEND_URL: Joi.string().uri().optional(),
+  
+  // Email
+  EMAIL_HOST: Joi.string().required(),
+  EMAIL_PORT: Joi.number().default(465),
+  EMAIL_SECURE: Joi.string().valid('true', 'false').default('true'),
+  EMAIL_USER: Joi.string().required(),
+  EMAIL_PASSWORD: Joi.string().required(),
+  EMAIL_FROM: Joi.string().email().optional(),
 }).unknown();
 
 // Validate environment variables
@@ -83,5 +91,13 @@ export const env = {
   
   // CORS
   FRONTEND_URL: envVars.FRONTEND_URL || 'http://localhost:3000',
+  
+  // Email
+  EMAIL_HOST: envVars.EMAIL_HOST,
+  EMAIL_PORT: envVars.EMAIL_PORT,
+  EMAIL_SECURE: envVars.EMAIL_SECURE,
+  EMAIL_USER: envVars.EMAIL_USER,
+  EMAIL_PASSWORD: envVars.EMAIL_PASSWORD,
+  EMAIL_FROM: envVars.EMAIL_FROM,
 };
 

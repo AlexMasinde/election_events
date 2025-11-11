@@ -20,8 +20,8 @@ export class Event {
   @Column({ type: 'varchar', length: 255 })
   eventName: string;
 
-  @Column({ type: 'varchar', length: 255 })
-  county: string;
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  county: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   constituency: string | null;

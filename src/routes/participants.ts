@@ -54,23 +54,16 @@ router.post(
         return;
       }
 
-      // Validate that event has county (required minimum)
-      if (!event.county) {
-        res.status(400).json({
-          message: 'Event must have a county to perform voter lookup',
-        });
-        return;
-      }
-
-      // Prepare filters from event (county is required, constituency and ward are optional)
+      // Prepare filters from event (all optional - only include if available)
       const filters: {
-        county: string;
+        county?: string;
         constituency?: string;
         ward?: string;
-      } = {
-        county: event.county,
-      };
+      } = {};
 
+      if (event.county) {
+        filters.county = event.county;
+      }
       if (event.constituency) {
         filters.constituency = event.constituency;
       }

@@ -16,9 +16,9 @@ router.post(
     try {
       const { eventName, county, constituency, ward } = req.body;
 
-      if (!eventName || !county) {
+      if (!eventName) {
         res.status(400).json({
-          message: 'Event name and county are required',
+          message: 'Event name is required',
         });
         return;
       }
@@ -27,7 +27,7 @@ router.post(
 
       const event = eventRepository.create({
         eventName,
-        county,
+        county: county || null,
         constituency: constituency || null,
         ward: ward || null,
         createdById: req.user!.id,

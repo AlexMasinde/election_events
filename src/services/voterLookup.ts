@@ -2,7 +2,7 @@ import { env } from '../config/env';
 import logger from '../config/logger';
 
 interface VoterLookupFilters {
-  county: string;
+  county?: string;
   constituency?: string;
   ward?: string;
 }
@@ -48,6 +48,18 @@ export const lookupVoter = async (
     const apiUrl = env.VOTER_LOOKUP_API_URL;
     const apiToken = env.VOTER_LOOKUP_API_TOKEN;
 
+    // Build filters object - only include non-empty values
+    const filtersToSend: VoterLookupFilters = {};
+    if (filters.county) {
+      filtersToSend.county = filters.county;
+    }
+    if (filters.constituency) {
+      filtersToSend.constituency = filters.constituency;
+    }
+    if (filters.ward) {
+      filtersToSend.ward = filters.ward;
+    }
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -56,7 +68,7 @@ export const lookupVoter = async (
       },
       body: JSON.stringify({
         id_number: idNumber,
-        filters: filters,
+        filters: Object.keys(filtersToSend).length > 0 ? filtersToSend : undefined,
       }),
     });
 

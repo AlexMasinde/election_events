@@ -9,7 +9,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Event } from './Event';
-import { Participant } from './Participant';
+import { CheckInLog } from './CheckInLog';
 
 export enum UserRole {
   ADMIN = 'admin',
@@ -59,7 +59,7 @@ export class User {
   @OneToMany(() => Event, (event) => event.createdBy)
   events: Event[];
 
-  @OneToMany(() => Participant, (participant) => participant.checkedInBy)
-  participants: Participant[];
+  @OneToMany(() => CheckInLog, (checkInLog) => checkInLog.checkedInBy)
+  checkInLogs: CheckInLog[];
 }
 

@@ -314,6 +314,21 @@ router.get(
 
       const totalPages = Math.ceil(total / limit);
 
+      // For super admin, calculate role-based statistics
+      let statistics = undefined;
+      if (userRole === UserRole.SUPER_ADMIN || userRole === 'super_admin') {
+        const totalAdmins = await userRepository.count({
+          where: { role: UserRole.ADMIN },
+        });
+        const totalRegularUsers = await userRepository.count({
+          where: { role: UserRole.USER },
+        });
+        statistics = {
+          totalAdmins,
+          totalRegularUsers,
+        };
+      }
+
       res.json({
         message: 'Users fetched successfully',
         users,
@@ -325,6 +340,7 @@ router.get(
           hasNextPage: page < totalPages,
           hasPreviousPage: page > 1,
         },
+        ...(statistics && { statistics }),
       });
     } catch (error) {
       logger.error('Get users error:', {

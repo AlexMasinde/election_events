@@ -66,7 +66,14 @@ router.get(
       const eventRepository = AppDataSource.getRepository(Event);
       let events: Event[];
 
-      if (req.user!.role === UserRole.ADMIN) {
+      const userRole = req.user!.role as string;
+      if (userRole === UserRole.SUPER_ADMIN || userRole === 'super_admin') {
+        // Super admins see all events
+        events = await eventRepository.find({
+          relations: ['createdBy'],
+          order: { createdAt: 'DESC' },
+        });
+      } else if (userRole === UserRole.ADMIN || userRole === 'admin') {
         // Admins see only events they created
         events = await eventRepository.find({
           where: { createdById: req.user!.id },
@@ -137,7 +144,10 @@ router.get(
       }
 
       // Check access permissions
-      if (req.user!.role === UserRole.ADMIN) {
+      const userRole = req.user!.role as string;
+      if (userRole === UserRole.SUPER_ADMIN || userRole === 'super_admin') {
+        // Super admins can access all events
+      } else if (userRole === UserRole.ADMIN || userRole === 'admin') {
         if (event.createdById !== req.user!.id) {
           res.status(403).json({ message: 'Access denied' });
           return;
@@ -196,8 +206,9 @@ router.delete(
         return;
       }
 
-      // Only allow admin to delete their own events
-      if (event.createdById !== req.user!.id) {
+      // Allow super admin to delete any event, regular admin can only delete their own events
+      const userRole = req.user!.role as string;
+      if (userRole !== UserRole.SUPER_ADMIN && userRole !== 'super_admin' && event.createdById !== req.user!.id) {
         res.status(403).json({ message: 'Access denied. You can only delete events you created.' });
         return;
       }

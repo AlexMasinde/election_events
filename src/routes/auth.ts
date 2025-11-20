@@ -261,7 +261,7 @@ function generateRandomPassword(): string {
   return password;
 }
 
-// Get users (Admin only) - returns users assigned to the admin
+// Get users (Admin only) - returns users assigned to the admin, or all users for super admin
 router.get(
   '/users',
   authenticate,
@@ -269,14 +269,25 @@ router.get(
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const userRepository = AppDataSource.getRepository(User);
-      const adminId = req.user!.id;
 
-      // Fetch users assigned to this admin
-      const users = await userRepository.find({
-        where: { adminId },
-        select: ['id', 'name', 'email', 'role', 'adminId', 'createdAt'],
-        order: { createdAt: 'DESC' },
-      });
+      let users: User[];
+
+      const userRole = req.user!.role as string;
+      if (userRole === UserRole.SUPER_ADMIN || userRole === 'super_admin') {
+        // Super admin sees all users (including other admins)
+        users = await userRepository.find({
+          select: ['id', 'name', 'email', 'role', 'adminId', 'createdAt'],
+          order: { createdAt: 'DESC' },
+        });
+      } else {
+        // Regular admin sees only users assigned to them
+        const adminId = req.user!.id;
+        users = await userRepository.find({
+          where: { adminId },
+          select: ['id', 'name', 'email', 'role', 'adminId', 'createdAt'],
+          order: { createdAt: 'DESC' },
+        });
+      }
 
       res.json({
         message: 'Users fetched successfully',
@@ -402,6 +413,21 @@ router.delete(
       if (!user) {
         res.status(404).json({ message: 'User not found' });
         return;
+      }
+
+      // Prevent deleting yourself
+      if (user.id === req.user!.id) {
+        res.status(400).json({ message: 'You cannot delete your own account' });
+        return;
+      }
+
+      // Regular admins can only delete users assigned to them
+      const userRole = req.user!.role as string;
+      if (userRole !== UserRole.SUPER_ADMIN && userRole !== 'super_admin') {
+        if (user.adminId !== req.user!.id) {
+          res.status(403).json({ message: 'Access denied. You can only delete users assigned to you.' });
+          return;
+        }
       }
 
       // Revoke all tokens by clearing refresh token

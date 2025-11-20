@@ -15,7 +15,11 @@ async function checkEventAccess(
   event: Event,
   user: User
 ): Promise<boolean> {
-  if (user.role === UserRole.ADMIN) {
+  const userRole = user.role as string;
+  if (userRole === UserRole.SUPER_ADMIN || userRole === 'super_admin') {
+    // Super admins can access all events
+    return true;
+  } else if (userRole === UserRole.ADMIN || userRole === 'admin') {
     return event.createdById === user.id;
   } else {
     return user.adminId !== null && event.createdById === user.adminId;

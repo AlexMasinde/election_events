@@ -50,7 +50,9 @@ export const requireAdmin = (
     return;
   }
 
-  if (req.user.role !== UserRole.ADMIN) {
+  // Check both enum value and string value for compatibility
+  const role = req.user.role as string;
+  if (role !== UserRole.ADMIN && role !== UserRole.SUPER_ADMIN && role !== 'admin' && role !== 'super_admin') {
     res.status(403).json({ message: 'Admin access required' });
     return;
   }

@@ -26,7 +26,7 @@ const dbConfig = {
   username: env.DB_USERNAME,
   password: env.DB_PASSWORD,
   database: env.DB_DATABASE,
-  synchronize: true,
+  synchronize: false,
   // synchronize: env.NODE_ENV !== 'production',
   logging: env.NODE_ENV === 'development',
   entities: [User, Event, Participant, CheckInLog],

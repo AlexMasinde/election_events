@@ -28,10 +28,14 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   
   // In development, allow localhost:3000 and localhost:3001
-  // In production, use the configured FRONTEND_URL
+  // In production, use the configured FRONTEND_URL and allow subdomains
   const allowedOrigins = env.NODE_ENV === 'development'
     ? ['http://localhost:3000', 'http://localhost:3001']
-    : [env.FRONTEND_URL];
+    : [
+        env.FRONTEND_URL,
+        'https://events.uda.ke',
+        'https://www.events.uda.ke',
+      ];
   
   // Check if the origin is allowed
   if (origin && allowedOrigins.includes(origin)) {
@@ -45,6 +49,7 @@ app.use((req, res, next) => {
   
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Expose-Headers', 'Content-Type, Authorization');
   
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);

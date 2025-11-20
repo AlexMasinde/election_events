@@ -19,12 +19,31 @@ const router = Router();
 // Helper function to get cookie options based on environment
 function getCookieOptions() {
   const isProduction = env.NODE_ENV === 'production';
-  return {
+  
+  // For production, set domain to work across subdomains (events.uda.ke and api.events.uda.ke)
+  // Since both are under events.uda.ke, we use the more specific domain
+  const cookieOptions: {
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: 'none' | 'lax' | 'strict';
+    maxAge: number;
+    domain?: string;
+    path: string;
+  } = {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? ('none' as const) : ('lax' as const),
+    sameSite: isProduction ? ('lax' as const) : ('lax' as const), // Use 'lax' for same-site (better mobile support)
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    path: '/',
   };
+
+  // Set domain for production to enable cross-subdomain cookies
+  // Using '.events.uda.ke' is more specific and works better with sameSite: 'lax'
+  if (isProduction) {
+    cookieOptions.domain = '.events.uda.ke'; // Leading dot allows all subdomains under events.uda.ke
+  }
+
+  return cookieOptions;
 }
 
 // Signup
@@ -232,11 +251,10 @@ router.post('/logout', authenticate, async (req: AuthRequest, res: Response): Pr
     await userRepository.save(user);
 
     // Clear refresh token cookie (must use same options as setCookie)
-    res.clearCookie('refreshToken', {
-      httpOnly: true,
-      secure: env.NODE_ENV === 'production',
-      sameSite: env.NODE_ENV === 'production' ? ('none' as const) : ('lax' as const),
-    });
+    const clearCookieOptions = getCookieOptions();
+    // Remove maxAge for clearCookie
+    const { maxAge, ...clearOptions } = clearCookieOptions;
+    res.clearCookie('refreshToken', clearOptions);
 
     res.json({ message: 'Logout successful' });
   } catch (error) {

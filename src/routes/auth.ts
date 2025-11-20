@@ -41,7 +41,7 @@ function getCookieOptions() {
   // Using 'uda.ke' allows cookies to work across events.uda.ke and api.events.uda.ke
   // sameSite: 'none' ensures cookies are sent on cross-origin requests (required for API calls)
   if (isProduction) {
-    cookieOptions.domain = 'uda.ke'; // Without leading dot - works better with modern browsers
+    cookieOptions.domain = '.uda.ke'; // Without leading dot - works better with modern browsers
   }
 
   return cookieOptions;

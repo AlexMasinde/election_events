@@ -38,10 +38,10 @@ function getCookieOptions() {
   };
 
   // Set domain for production to enable cross-subdomain cookies
-  // Using '.uda.ke' allows cookies to work across events.uda.ke and api.events.uda.ke
+  // Using 'uda.ke' allows cookies to work across events.uda.ke and api.events.uda.ke
   // sameSite: 'none' ensures cookies are sent on cross-origin requests (required for API calls)
   if (isProduction) {
-    cookieOptions.domain = '.uda.ke'; // Leading dot allows all subdomains of uda.ke
+    cookieOptions.domain = 'uda.ke'; // Without leading dot - works better with modern browsers
   }
 
   return cookieOptions;

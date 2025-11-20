@@ -20,29 +20,24 @@ const router = Router();
 function getCookieOptions() {
   const isProduction = env.NODE_ENV === 'production';
   
-  // For production, set domain to work across subdomains (events.uda.ke and api.events.uda.ke)
-  // Both are subdomains of uda.ke, so we use '.uda.ke' as the domain
+  // Cookie options for cross-origin authentication
+  // Note: We don't set the 'domain' attribute because mobile browsers (especially iOS Safari)
+  // reject cookies with domain attribute when sameSite: 'none' is used.
+  // Without domain, the cookie is scoped to the exact origin (events-api.uda.ke),
+  // but sameSite: 'none' still allows it to be sent cross-origin to events.uda.ke
   const cookieOptions: {
     httpOnly: boolean;
     secure: boolean;
     sameSite: 'none' | 'lax' | 'strict';
     maxAge: number;
-    domain?: string;
     path: string;
   } = {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? ('none' as const) : ('lax' as const), // 'none' required for cross-subdomain API calls
+    sameSite: isProduction ? ('none' as const) : ('lax' as const), // 'none' required for cross-origin API calls
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
   };
-
-  // Set domain for production to enable cross-subdomain cookies
-  // Using 'uda.ke' allows cookies to work across events.uda.ke and api.events.uda.ke
-  // sameSite: 'none' ensures cookies are sent on cross-origin requests (required for API calls)
-  if (isProduction) {
-    cookieOptions.domain = '.uda.ke'; // Without leading dot - works better with modern browsers
-  }
 
   return cookieOptions;
 }
@@ -289,28 +284,47 @@ router.get(
     try {
       const userRepository = AppDataSource.getRepository(User);
 
-      let users: User[];
+      // Parse pagination parameters
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+      const skip = (page - 1) * limit;
+
+      // Build query based on user role
+      let queryBuilder = userRepository.createQueryBuilder('user')
+        .select(['user.id', 'user.name', 'user.email', 'user.role', 'user.adminId', 'user.createdAt'])
+        .orderBy('user.createdAt', 'DESC');
 
       const userRole = req.user!.role as string;
       if (userRole === UserRole.SUPER_ADMIN || userRole === 'super_admin') {
-        // Super admin sees all users (including other admins)
-        users = await userRepository.find({
-          select: ['id', 'name', 'email', 'role', 'adminId', 'createdAt'],
-          order: { createdAt: 'DESC' },
-        });
+        // Super admin sees all users (including other admins) - no additional where clause
       } else {
         // Regular admin sees only users assigned to them
         const adminId = req.user!.id;
-        users = await userRepository.find({
-          where: { adminId },
-          select: ['id', 'name', 'email', 'role', 'adminId', 'createdAt'],
-          order: { createdAt: 'DESC' },
-        });
+        queryBuilder = queryBuilder.where('user.adminId = :adminId', { adminId });
       }
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Get paginated results
+      const users = await queryBuilder
+        .skip(skip)
+        .take(limit)
+        .getMany();
+
+      const totalPages = Math.ceil(total / limit);
 
       res.json({
         message: 'Users fetched successfully',
         users,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
       });
     } catch (error) {
       logger.error('Get users error:', {

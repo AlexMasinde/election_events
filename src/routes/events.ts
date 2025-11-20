@@ -64,22 +64,23 @@ router.get(
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
       const eventRepository = AppDataSource.getRepository(Event);
-      let events: Event[];
+      
+      // Parse pagination parameters
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+      const skip = (page - 1) * limit;
+
+      // Build query based on user role
+      let queryBuilder = eventRepository.createQueryBuilder('event')
+        .leftJoinAndSelect('event.createdBy', 'createdBy')
+        .orderBy('event.createdAt', 'DESC');
 
       const userRole = req.user!.role as string;
       if (userRole === UserRole.SUPER_ADMIN || userRole === 'super_admin') {
-        // Super admins see all events
-        events = await eventRepository.find({
-          relations: ['createdBy'],
-          order: { createdAt: 'DESC' },
-        });
+        // Super admins see all events - no additional where clause
       } else if (userRole === UserRole.ADMIN || userRole === 'admin') {
         // Admins see only events they created
-        events = await eventRepository.find({
-          where: { createdById: req.user!.id },
-          relations: ['createdBy'],
-          order: { createdAt: 'DESC' },
-        });
+        queryBuilder = queryBuilder.where('event.createdById = :adminId', { adminId: req.user!.id });
       } else {
         // Users see only events created by their admin
         if (!req.user!.adminId) {
@@ -88,13 +89,19 @@ router.get(
           });
           return;
         }
-
-        events = await eventRepository.find({
-          where: { createdById: req.user!.adminId },
-          relations: ['createdBy'],
-          order: { createdAt: 'DESC' },
-        });
+        queryBuilder = queryBuilder.where('event.createdById = :adminId', { adminId: req.user!.adminId });
       }
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Get paginated results
+      const events = await queryBuilder
+        .skip(skip)
+        .take(limit)
+        .getMany();
+
+      const totalPages = Math.ceil(total / limit);
 
       res.json({
         message: 'Events retrieved successfully',
@@ -112,6 +119,14 @@ router.get(
           createdAt: event.createdAt,
           updatedAt: event.updatedAt,
         })),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
       });
     } catch (error) {
       logger.error('Get events error:', {

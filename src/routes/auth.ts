@@ -21,7 +21,7 @@ function getCookieOptions() {
   const isProduction = env.NODE_ENV === 'production';
   
   // For production, set domain to work across subdomains (events.uda.ke and api.events.uda.ke)
-  // Since both are under events.uda.ke, we use the more specific domain
+  // Both are subdomains of uda.ke, so we use '.uda.ke' as the domain
   const cookieOptions: {
     httpOnly: boolean;
     secure: boolean;
@@ -32,15 +32,16 @@ function getCookieOptions() {
   } = {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? ('lax' as const) : ('lax' as const), // Use 'lax' for same-site (better mobile support)
+    sameSite: isProduction ? ('none' as const) : ('lax' as const), // 'none' required for cross-subdomain API calls
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     path: '/',
   };
 
   // Set domain for production to enable cross-subdomain cookies
-  // Using '.events.uda.ke' is more specific and works better with sameSite: 'lax'
+  // Using '.uda.ke' allows cookies to work across events.uda.ke and api.events.uda.ke
+  // sameSite: 'none' ensures cookies are sent on cross-origin requests (required for API calls)
   if (isProduction) {
-    cookieOptions.domain = '.events.uda.ke'; // Leading dot allows all subdomains under events.uda.ke
+    cookieOptions.domain = '.uda.ke'; // Leading dot allows all subdomains of uda.ke
   }
 
   return cookieOptions;

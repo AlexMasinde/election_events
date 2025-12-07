@@ -4,6 +4,7 @@ import { Event } from '../entities/Event';
 import { User, UserRole } from '../entities/User';
 import { PollingCenter } from '../entities/PollingCenter';
 import { CheckInLog } from '../entities/CheckInLog';
+import { Participant } from '../entities/Participant';
 import { In } from 'typeorm';
 import { authenticate, AuthRequest, requireAdmin, requireSuperAdmin } from '../middleware/auth';
 import logger from '../config/logger';
@@ -269,6 +270,8 @@ router.delete(
       const { eventId } = req.params;
 
       const eventRepository = AppDataSource.getRepository(Event);
+      const participantRepository = AppDataSource.getRepository(Participant);
+      const checkInLogRepository = AppDataSource.getRepository(CheckInLog);
 
       const event = await eventRepository.findOne({
         where: { eventId },
@@ -286,6 +289,14 @@ router.delete(
         return;
       }
 
+      // 1. Delete related CheckInLogs
+      // We do this first to satisfy FK constraints if they exist and aren't set to cascade
+      await checkInLogRepository.delete({ eventId });
+      
+      // 2. Delete related Participants
+      await participantRepository.delete({ eventId });
+
+      // 3. Delete the Event
       await eventRepository.remove(event);
 
       logger.info('Event deleted successfully', {

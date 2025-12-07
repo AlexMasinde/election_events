@@ -40,7 +40,7 @@ class SmsService {
         return false;
       }
 
-      const message = `Welcome to UDA Events! Your account has been created.\nEmail: ${email}\nPassword: ${password}\nLogin at: ${env.FRONTEND_URL}`;
+      const message = `Welcome to UDA Events! Your account has been created.\nEmail: ${email}\nPassword: ${password}`;
       
       const url = `https://api.smsleopard.com/v1/sms/send?message=${encodeURIComponent(message)}&source=${this.source}&username=${this.username}&password=${encodeURIComponent(this.password)}&destination=${sanitized}`;
 

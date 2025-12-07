@@ -60,3 +60,23 @@ export const requireAdmin = (
   next();
 };
 
+export const requireSuperAdmin = (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): void => {
+  if (!req.user) {
+    res.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  // Check both enum value and string value for compatibility
+  const role = req.user.role as string;
+  if (role !== UserRole.SUPER_ADMIN && role !== 'super_admin') {
+    res.status(403).json({ message: 'Super Admin access required' });
+    return;
+  }
+
+  next();
+};
+

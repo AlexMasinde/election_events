@@ -46,6 +46,11 @@ const envSchema = Joi.object({
   EMAIL_USER: Joi.string().required(),
   EMAIL_PASSWORD: Joi.string().required(),
   EMAIL_FROM: Joi.string().email().optional(),
+
+  // SMS
+  SMS_LEOPARD_USERNAME: Joi.string().required(),
+  SMS_LEOPARD_PASSWORD: Joi.string().required(),
+  SMS_LEOPARD_SOURCE: Joi.string().required(),
 }).unknown();
 
 // Validate environment variables
@@ -99,5 +104,10 @@ export const env = {
   EMAIL_USER: envVars.EMAIL_USER,
   EMAIL_PASSWORD: envVars.EMAIL_PASSWORD,
   EMAIL_FROM: envVars.EMAIL_FROM,
+
+  // SMS
+  SMS_LEOPARD_USERNAME: envVars.SMS_LEOPARD_USERNAME,
+  SMS_LEOPARD_PASSWORD: envVars.SMS_LEOPARD_PASSWORD,
+  SMS_LEOPARD_SOURCE: envVars.SMS_LEOPARD_SOURCE,
 };
 

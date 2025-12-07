@@ -125,6 +125,7 @@ router.post(
         constituency,
         ward,
         pollingCenter,
+        phoneNumber,
       } = req.body;
 
       if (!eventId || !idNumber || !name || !dateOfBirth || !sex) {
@@ -175,6 +176,7 @@ router.post(
           constituency: constituency || null,
           ward: ward || null,
           pollingCenter: pollingCenter || null,
+          phoneNumber: phoneNumber || null,
         });
         await participantRepository.save(participant);
       } else {
@@ -186,6 +188,9 @@ router.post(
         participant.constituency = constituency || null;
         participant.ward = ward || null;
         participant.pollingCenter = pollingCenter || null;
+        if (phoneNumber) {
+             participant.phoneNumber = phoneNumber;
+        }
         await participantRepository.save(participant);
       }
 

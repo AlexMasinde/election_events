@@ -9,10 +9,10 @@ import {
   verifyToken,
   TokenPayload,
 } from '../utils/auth';
-import { AuthRequest, authenticate, requireAdmin } from '../middleware/auth';
+import { AuthRequest, authenticate, requireAdmin, requireSuperAdmin } from '../middleware/auth';
 import logger from '../config/logger';
 import { env } from '../config/env';
-import { emailService } from '../services/email';
+import { smsService } from '../services/sms';
 
 const router = Router();
 
@@ -45,7 +45,7 @@ function getCookieOptions() {
 // Signup
 router.post('/signup', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, phoneNumber } = req.body;
 
     if (!name || !email || !password) {
       res.status(400).json({
@@ -75,6 +75,7 @@ router.post('/signup', async (req: Request, res: Response): Promise<void> => {
       email,
       password: hashedPassword,
       role: UserRole.USER,
+      phoneNumber: phoneNumber || null,
     });
 
     await userRepository.save(user);
@@ -356,14 +357,16 @@ router.get(
 router.post(
   '/users',
   authenticate,
-  requireAdmin,
+  requireSuperAdmin,
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-      const { name, email } = req.body;
+      const { name, email, phoneNumber } = req.body;
+      
+      logger.info('Creating new user:', { name, email, phoneNumber });
 
-      if (!name || !email) {
+      if (!name || !email || !phoneNumber) {
         res.status(400).json({
-          message: 'Name and email are required',
+          message: 'Name, email, and phone number are required',
         });
         return;
       }
@@ -391,37 +394,40 @@ router.post(
         password: hashedPassword,
         role: UserRole.USER,
         adminId: req.user!.id, // Assign to the creating admin
+        phoneNumber,
       });
 
       await userRepository.save(user);
 
-      // Send email with credentials
-      const emailSent = await emailService.sendUserCredentials(
+      // Send SMS with credentials
+      const smsSent = await smsService.sendUserCredentials(
+        phoneNumber,
         email,
-        name,
         randomPassword,
       );
 
-      if (emailSent) {
+      if (smsSent) {
         res.status(201).json({
-          message: 'User created successfully. Login credentials have been sent to their email.',
+          message: 'User created successfully. Login credentials have been sent to their phone number.',
           user: {
             id: user.id,
             name: user.name,
             email: user.email,
             role: user.role,
             adminId: user.adminId,
+            phoneNumber: user.phoneNumber,
           },
         });
       } else {
         res.status(201).json({
-          message: 'User created successfully, but failed to send email. Please provide credentials manually.',
+          message: 'User created successfully, but failed to send SMS. Please provide credentials manually.',
           user: {
             id: user.id,
             name: user.name,
             email: user.email,
             role: user.role,
             adminId: user.adminId,
+            phoneNumber: user.phoneNumber,
           },
           password: randomPassword, // Return password if email failed
         });

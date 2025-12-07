@@ -38,6 +38,9 @@ export class Participant {
   @Column({ type: 'varchar', length: 255, nullable: true })
   ward: string | null;
 
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phoneNumber: string | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true })
   pollingCenter: string | null;
 

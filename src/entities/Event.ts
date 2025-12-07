@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   OneToMany,
+  ManyToMany,
   JoinColumn,
 } from 'typeorm';
 import { User } from './User';
@@ -44,6 +45,9 @@ export class Event {
 
   @OneToMany(() => Participant, (participant) => participant.event)
   participants: Participant[];
+
+  @ManyToMany(() => User, (user) => user.assignedEvents)
+  assignedUsers: User[];
 
   @OneToMany(() => CheckInLog, (checkInLog) => checkInLog.event)
   checkInLogs: CheckInLog[];

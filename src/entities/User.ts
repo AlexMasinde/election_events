@@ -6,6 +6,8 @@ import {
   UpdateDateColumn,
   OneToMany,
   ManyToOne,
+  ManyToMany,
+  JoinTable,
   JoinColumn,
 } from 'typeorm';
 import { Event } from './Event';
@@ -30,6 +32,9 @@ export class User {
 
   @Column({ type: 'varchar', length: 255 })
   password: string;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phoneNumber: string;
 
   @Column({
     type: 'enum',
@@ -59,6 +64,20 @@ export class User {
 
   @OneToMany(() => Event, (event) => event.createdBy)
   events: Event[];
+
+  @ManyToMany(() => Event, (event) => event.assignedUsers)
+  @JoinTable({
+    name: 'users_events',
+    joinColumn: {
+      name: 'userId',
+      referencedColumnName: 'id',
+    },
+    inverseJoinColumn: {
+      name: 'eventId',
+      referencedColumnName: 'eventId',
+    },
+  })
+  assignedEvents: Event[];
 
   @OneToMany(() => CheckInLog, (checkInLog) => checkInLog.checkedInBy)
   checkInLogs: CheckInLog[];

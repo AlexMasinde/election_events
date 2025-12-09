@@ -85,7 +85,6 @@ export const lookupVoter = async (
     }
 
     const data = (await response.json()) as VoterLookupResponse;
-    console.log('Raw Voter Lookup Response:', JSON.stringify(data, null, 2));
     
     const registeredVoters = data.message.registered_voters;
     const adultPopulation = data.message.adult_population;

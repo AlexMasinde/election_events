@@ -10,6 +10,7 @@ import { env } from './config/env';
 import authRoutes from './routes/auth';
 import eventRoutes from './routes/events';
 import participantRoutes from './routes/participants';
+import analyticsRoutes from './routes/analytics';
 
 const app = express();
 
@@ -72,6 +73,7 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/participants', participantRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

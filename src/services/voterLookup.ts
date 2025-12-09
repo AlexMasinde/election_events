@@ -21,9 +21,17 @@ interface RegisteredVoter {
   stream?: string;
 }
 
+interface AdultPopulation {
+  id_number: string;
+  full_name: string;
+  date_of_birth: string;
+  sex: string;
+}
+
 interface VoterLookupResponse {
   message: {
     registered_voters: RegisteredVoter | null;
+    adult_population: AdultPopulation | null;
     id_number: string;
     filters_applied?: VoterLookupFilters;
   };
@@ -77,35 +85,51 @@ export const lookupVoter = async (
     }
 
     const data = (await response.json()) as VoterLookupResponse;
+    console.log('Raw Voter Lookup Response:', JSON.stringify(data, null, 2));
+    
     const registeredVoters = data.message.registered_voters;
+    const adultPopulation = data.message.adult_population;
 
-    if (!registeredVoters) {
-      return null;
+    if (registeredVoters) {
+      // Concatenate name fields, handling null values
+      const nameParts: string[] = [];
+      if (registeredVoters.first_name) {
+        nameParts.push(registeredVoters.first_name);
+      }
+      if (registeredVoters.middle_name) {
+        nameParts.push(registeredVoters.middle_name);
+      }
+      if (registeredVoters.surname) {
+        nameParts.push(registeredVoters.surname);
+      }
+      const fullName = nameParts.join(' ').trim();
+
+      return {
+        idNumber: registeredVoters.id_or_passport_number,
+        name: fullName,
+        dateOfBirth: registeredVoters.date_of_birth,
+        sex: registeredVoters.sex,
+        county: registeredVoters.county,
+        constituency: registeredVoters.constituency,
+        ward: registeredVoters.ward,
+        pollingCenter: registeredVoters.polling_center,
+      };
+    } else if (adultPopulation) {
+      // Fallback to adult population data
+      // Use event filters for location data as requested
+      return {
+        idNumber: adultPopulation.id_number,
+        name: adultPopulation.full_name,
+        dateOfBirth: adultPopulation.date_of_birth,
+        sex: adultPopulation.sex,
+        county: filters.county || '',
+        constituency: filters.constituency || '',
+        ward: filters.ward || '',
+        pollingCenter: 'Adult Population Registry', // Indicate source
+      };
     }
 
-    // Concatenate name fields, handling null values
-    const nameParts: string[] = [];
-    if (registeredVoters.first_name) {
-      nameParts.push(registeredVoters.first_name);
-    }
-    if (registeredVoters.middle_name) {
-      nameParts.push(registeredVoters.middle_name);
-    }
-    if (registeredVoters.surname) {
-      nameParts.push(registeredVoters.surname);
-    }
-    const fullName = nameParts.join(' ').trim();
-
-    return {
-      idNumber: registeredVoters.id_or_passport_number,
-      name: fullName,
-      dateOfBirth: registeredVoters.date_of_birth,
-      sex: registeredVoters.sex,
-      county: registeredVoters.county,
-      constituency: registeredVoters.constituency,
-      ward: registeredVoters.ward,
-      pollingCenter: registeredVoters.polling_center,
-    };
+    return null;
   } catch (error) {
     logger.error('Error looking up voter:', {
       error: error instanceof Error ? error.message : String(error),

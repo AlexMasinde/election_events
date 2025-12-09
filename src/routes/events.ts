@@ -392,10 +392,11 @@ router.get(
         .andWhere('participant.pollingCenter IS NOT NULL')
         .andWhere("participant.pollingCenter != ''");
 
-      const activePollingCenters = await activeCentersQuery
-        .select(['participant.pollingCenter', 'participant.ward', 'participant.constituency'])
-        .distinct(true)
-        .getCount();
+      const activePollingCentersResult = await activeCentersQuery
+        .select("COUNT(DISTINCT CONCAT(participant.pollingCenter, '|', participant.ward, '|', participant.constituency))", 'count')
+        .getRawOne();
+      
+      const activePollingCenters = parseInt(activePollingCentersResult?.count) || 0;
       
       const inactivePollingCenters = Math.max(0, totalPollingCenters - activePollingCenters);
 
@@ -439,7 +440,7 @@ router.get(
       const breakdownActivity = await breakdownCheckInsQuery
         .select([`${participantLocationField} as name`])
         .addSelect('COUNT(log.id)', 'total_checkins')
-        .addSelect('COUNT(DISTINCT participant.pollingCenter)', 'active_centers')
+        .addSelect("COUNT(DISTINCT CONCAT(participant.pollingCenter, '|', participant.ward, '|', participant.constituency))", 'active_centers')
         .groupBy(participantLocationField)
         .getRawMany();
 

@@ -330,11 +330,24 @@ router.get(
 
       const event = await eventRepository.findOne({
         where: { eventId },
+        relations: ['assignedUsers'],
       });
 
       if (!event) {
         res.status(404).json({ message: 'Event not found' });
         return;
+      }
+
+      // Check access permissions
+      const userRole = req.user!.role as string;
+      if (userRole !== UserRole.SUPER_ADMIN && userRole !== 'super_admin') {
+        // Check if user is assigned to this event
+        const isAssigned = event.assignedUsers.some(u => u.id === req.user!.id);
+
+        if (!isAssigned) {
+          res.status(403).json({ message: 'Access denied' });
+          return;
+        }
       }
 
       // Determine jurisdiction level
@@ -527,11 +540,24 @@ router.get(
       
       const event = await eventRepository.findOne({
         where: { eventId },
+        relations: ['assignedUsers'],
       });
 
       if (!event) {
         res.status(404).json({ message: 'Event not found' });
         return;
+      }
+
+      // Check access permissions
+      const userRole = req.user!.role as string;
+      if (userRole !== UserRole.SUPER_ADMIN && userRole !== 'super_admin') {
+        // Check if user is assigned to this event
+        const isAssigned = event.assignedUsers.some(u => u.id === req.user!.id);
+
+        if (!isAssigned) {
+          res.status(403).json({ message: 'Access denied' });
+          return;
+        }
       }
 
       // Base query for polling centers in jurisdiction

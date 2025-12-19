@@ -196,7 +196,7 @@ export class PdfService {
         // 2. Participant Distribution Logic
         const distStats = participantDistMap.get(groupKey)!;
         distStats.total++;
-        if (!!p.county) { // Registered Logic
+        if (!!p.constituency?.trim()) { // Registered Logic (Based on Constituency presence)
             distStats.registered++;
         } else {
             distStats.nonRegistered++;
@@ -223,7 +223,7 @@ export class PdfService {
         // Only count Checked In participants
         if (!checkedInParticipantIds.has(p.id)) return acc;
 
-        const isRegistered = !!p.county; // Heuristic: if they have county data, they are likley registered
+        const isRegistered = !!p.constituency?.trim(); // Heuristic: if they have constituency data, they are likely registered
         if (isRegistered) {
           acc.registered.checkedIn++;
         } else {
@@ -347,7 +347,7 @@ export class PdfService {
             stats.activeCenters.add(uniqueKey);
         }
 
-        if (county !== 'Unregistered') {
+        if (!!p.constituency?.trim()) { // Voter registration check based on Constituency
              stats.registered++;
         } else {
              stats.nonRegistered++;
@@ -420,8 +420,8 @@ export class PdfService {
             gender: genderStats,
             age: ageStats,
             voterStatus: {
-                registered: { checkedIn: allParticipants.filter(p => !!p.county).length },
-                nonRegistered: { checkedIn: allParticipants.filter(p => !p.county).length }
+                registered: { checkedIn: allParticipants.filter(p => !!p.constituency?.trim()).length },
+                nonRegistered: { checkedIn: allParticipants.filter(p => !p.constituency?.trim()).length }
             },
             subjurisdiction: {
                 label: 'County',

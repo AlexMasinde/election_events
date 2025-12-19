@@ -691,16 +691,21 @@ router.get(
       const { eventId } = req.params;
       const pdfService = PdfService.getInstance();
       
-      const token = req.headers.authorization?.split(' ')[1];
+      const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
       const buffer = await pdfService.generateEventReport(eventId, token);
+
+      const eventRepository = AppDataSource.getRepository(Event);
+      const event = await eventRepository.findOne({ where: { eventId } });
+      const eventName = event?.eventName || 'event';
+      const sanitizedName = eventName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
 
       res.set({
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="event-report-${eventId}.pdf"`,
-        'Content-Length': buffer.length,
+        'Content-Disposition': `attachment; filename="${sanitizedName}-report.pdf"`,
+        'Content-Length': String(buffer.length),
       });
 
-      res.end(buffer);
+      res.send(buffer);
     } catch (error) {
       logger.error('Generate event report error:', {
         error: error instanceof Error ? error.message : String(error),
@@ -728,7 +733,7 @@ router.get(
       const pdfBuffer = await pdfService.generateGlobalReport(token);
 
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'attachment; filename=Global_National_Report.pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename=UDA_Sensitization_Phase_3.pdf');
       res.send(pdfBuffer);
 
     } catch (error) {

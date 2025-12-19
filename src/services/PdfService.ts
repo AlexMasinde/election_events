@@ -4,6 +4,7 @@ import { Event } from '../entities/Event';
 import { Participant } from '../entities/Participant';
 import { CheckInLog } from '../entities/CheckInLog';
 import { PollingCenter } from '../entities/PollingCenter';
+import { User } from '../entities/User';
 import logger from '../config/logger';
 
 export class PdfService {
@@ -64,6 +65,14 @@ export class PdfService {
     return 'NOT STATED';
   }
 
+  private normalizeGender(rawGender: string | null | undefined): string {
+    if (!rawGender) return 'NOT STATED';
+    const gender = rawGender.trim().toUpperCase();
+    if (gender === 'M' || gender === 'MALE') return 'MALE';
+    if (gender === 'F' || gender === 'FEMALE') return 'FEMALE';
+    return 'NOT STATED';
+  }
+
   // --- Main Report Generation ---
 
 
@@ -92,7 +101,7 @@ export class PdfService {
       const checkedInCount = checkedInParticipants.length;
       
       const genderStats = checkedInParticipants.reduce((acc, p) => {
-        const gender = p.sex || 'NOT STATED';
+        const gender = this.normalizeGender(p.sex);
         acc[gender] = (acc[gender] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
@@ -281,10 +290,7 @@ export class PdfService {
 
     // Demographics with Normalization
     const genderStats = allParticipants.reduce((acc, p) => {
-        let gender = (p.sex || 'NOT STATED').trim().toUpperCase();
-        if (gender === 'M') gender = 'MALE';
-        if (gender === 'F') gender = 'FEMALE';
-        
+        const gender = this.normalizeGender(p.sex);
         acc[gender] = (acc[gender] || 0) + 1;
         return acc;
     }, {} as Record<string, number>);
@@ -427,9 +433,58 @@ export class PdfService {
                 label: 'County',
                 data: countyData
             },
+            staff: (await this.getStaffAnalytics()).stats.staff,
             logoUrl: await this.getLogoDataUrl()
         }
     };
+  }
+
+  public async getStaffAnalytics(): Promise<any> {
+    const userRepository = AppDataSource.getRepository(User);
+    
+    // Fetch all users with their check-in logs and the events associated with those logs
+    // Using relations to get the necessary deep data: checkInLogs -> event
+    const users = await userRepository.find({
+        relations: ['checkInLogs', 'checkInLogs.event']
+    });
+
+    const staffData = users.map(user => {
+        const checkInCount = user.checkInLogs?.length || 0;
+        
+        // Extract unique counties from events where this user checked in participants
+        const countiesSet = new Set<string>();
+        user.checkInLogs?.forEach((log: CheckInLog) => {
+            if (log.event?.county) {
+                countiesSet.add(log.event.county);
+            }
+        });
+
+        return {
+            name: user.name,
+            email: user.email,
+            checkIns: checkInCount,
+            countiesVisited: Array.from(countiesSet).sort()
+        };
+    });
+
+    // Sort by check-ins descending
+    staffData.sort((a, b) => b.checkIns - a.checkIns);
+
+    return {
+        stats: {
+            staff: staffData,
+            totalUsers: users.length,
+            totalCheckIns: staffData.reduce((sum, d) => sum + d.checkIns, 0),
+            logoUrl: await this.getLogoDataUrl()
+        }
+    };
+  }
+
+  public async generateStaffReport(token?: string): Promise<Buffer> {
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+      const reportUrl = `${baseUrl}/reports/staff?token=${token || ''}`;
+      logger.info(`Generating Staff Performance Report from: ${reportUrl}`);
+      return this.generatePdfFromUrl(reportUrl);
   }
 
   public async generateGlobalReport(token?: string): Promise<Buffer> {

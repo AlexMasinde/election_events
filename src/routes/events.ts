@@ -770,5 +770,47 @@ router.get(
     }
   );
 
+// --- STAFF PERFORMANCE REPORT ENDPOINTS ---
+
+// Get Staff Analytics
+router.get(
+  '/analytics/staff',
+  authenticate,
+  requireSuperAdmin,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const pdfService = PdfService.getInstance();
+      const analytics = await pdfService.getStaffAnalytics();
+      res.json(analytics);
+    } catch (error) {
+       logger.error('Get staff analytics error:', error);
+       res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+);
+
+// Download Staff PDF Report
+router.get(
+  '/reports/staff/download',
+  authenticate,
+  requireSuperAdmin,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const pdfService = PdfService.getInstance();
+      
+      const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
+      const buffer = await pdfService.generateStaffReport(token);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename=Staff_Performance_Report.pdf');
+      res.send(buffer);
+
+    } catch (error) {
+      logger.error('Generate staff report error:', error);
+      res.status(500).json({ message: 'Internal server error during staff report generation' });
+    }
+  }
+);
+
 export default router;
 

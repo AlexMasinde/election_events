@@ -31,11 +31,12 @@ app.use((req, res, next) => {
   // In development, allow localhost:3000 and localhost:3001
   // In production, use the configured FRONTEND_URL and allow subdomains
   const allowedOrigins = env.NODE_ENV === 'development'
-    ? ['http://localhost:3000', 'http://localhost:3001']
+    ? ['http://localhost:3000', 'http://localhost:3001', 'https://preview-frontend-kzmg8koshmgm3xtu2v62.vusercontent.net']
     : [
         env.FRONTEND_URL,
         'https://events.uda.ke',
         'https://www.events.uda.ke',
+        'https://preview-frontend-kzmg8koshmgm3xtu2v62.vusercontent.net'
       ];
   
   // Check if the origin is allowed

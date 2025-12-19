@@ -8,6 +8,7 @@ import { Participant } from '../entities/Participant';
 import { In } from 'typeorm';
 import { authenticate, AuthRequest, requireAdmin, requireSuperAdmin } from '../middleware/auth';
 import logger from '../config/logger';
+import { PdfService } from '../services/PdfService';
 
 const router = Router();
 
@@ -659,6 +660,34 @@ router.get(
         stack: error instanceof Error ? error.stack : undefined,
       });
       res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+);
+
+// Generate Event Report PDF
+router.get(
+  '/:eventId/report',
+  authenticate,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { eventId } = req.params;
+      const pdfService = PdfService.getInstance();
+      
+      const buffer = await pdfService.generateEventReport(eventId);
+
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="event-report-${eventId}.pdf"`,
+        'Content-Length': buffer.length,
+      });
+
+      res.end(buffer);
+    } catch (error) {
+      logger.error('Generate event report error:', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      res.status(500).json({ message: 'Internal server error during report generation' });
     }
   }
 );

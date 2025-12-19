@@ -1,4 +1,4 @@
-import * as puppeteer from 'puppeteer-core';
+import puppeteer from 'puppeteer';
 import { AppDataSource } from '../config/database';
 import { Event } from '../entities/Event';
 import { Participant } from '../entities/Participant';
@@ -66,12 +66,8 @@ export class PdfService {
 
   // --- Main Report Generation ---
 
-  async generateEventReport(eventId: string): Promise<Buffer> {
-    let browser;
-    try {
-      logger.info(`Starting PDF generation for event: ${eventId}`);
 
-      // 1. Fetch Data
+  public async getEventAnalytics(eventId: string): Promise<{ event: Event, stats: any }> {
       const eventRepository = AppDataSource.getRepository(Event);
       const participantRepository = AppDataSource.getRepository(Participant);
       const checkInLogRepository = AppDataSource.getRepository(CheckInLog);
@@ -101,12 +97,23 @@ export class PdfService {
         return acc;
       }, {} as Record<string, number>);
 
-      const ageStats = checkedInParticipants.reduce((acc, p) => {
+      const ageStatsUnsorted = checkedInParticipants.reduce((acc, p) => {
         const age = this.calculateAge(p.dateOfBirth);
+        if (age !== null && age < 18) return acc; // Scrap Under 18s
+        
         const group = this.getAgeGroup(age);
         acc[group] = (acc[group] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
+
+      // Sort Age Stats Ascending
+      const ageOrder = ['18-27', '27-35', '35-50', '50-64', '65+', 'NOT STATED'];
+      const ageStats: Record<string, number> = {};
+      ageOrder.forEach(key => {
+          if (ageStatsUnsorted[key]) {
+              ageStats[key] = ageStatsUnsorted[key];
+          }
+      });
 
 
       // Coverage Logic: Count Polling Centers
@@ -149,12 +156,14 @@ export class PdfService {
       
       // Map: GroupName -> { totalCenters: number, activeCenters: Set<string> }
       const coverageMap = new Map<string, { total: number, active: Set<string> }>();
+      const participantDistMap = new Map<string, { total: number, registered: number, nonRegistered: number }>();
 
       // Init map with totals
       allPollingCenters.forEach(pc => {
         const groupKey = (pc[pcGroupByField] as string) || 'Unassigned';
         if (!coverageMap.has(groupKey)) {
             coverageMap.set(groupKey, { total: 0, active: new Set() });
+            participantDistMap.set(groupKey, { total: 0, registered: 0, nonRegistered: 0 });
         }
         coverageMap.get(groupKey)!.total++;
       });
@@ -179,19 +188,35 @@ export class PdfService {
              // or add if we want to show external attendees
              if (!coverageMap.has(groupKey)) {
                  coverageMap.set(groupKey, { total: 0, active: new Set() });
+                 participantDistMap.set(groupKey, { total: 0, registered: 0, nonRegistered: 0 });
              }
              if (p.pollingCenter) coverageMap.get(groupKey)!.active.add(p.pollingCenter);
         }
+
+        // 2. Participant Distribution Logic
+        const distStats = participantDistMap.get(groupKey)!;
+        distStats.total++;
+        if (!!p.county) { // Registered Logic
+            distStats.registered++;
+        } else {
+            distStats.nonRegistered++;
+        }
       });
 
-      const coverageData = Array.from(coverageMap.entries()).map(([name, stats]) => {
+      const combinedData = Array.from(coverageMap.entries()).map(([name, coverage]) => {
+          const dist = participantDistMap.get(name) || { total: 0, registered: 0, nonRegistered: 0 };
           return {
               name,
-              total: stats.total, // Total Polling Centers
-              active: stats.active.size, // Active Polling Centers (at least 1 checkin)
-              rate: stats.total > 0 ? Math.round((stats.active.size / stats.total) * 100) : 0
+              // Coverage Stats
+              totalCenters: coverage.total,
+              activeCenters: coverage.active.size,
+              coverageRate: coverage.total > 0 ? Math.round((coverage.active.size / coverage.total) * 100) : 0,
+              // Participant Stats
+              totalParticipants: dist.total,
+              registered: dist.registered,
+              nonRegistered: dist.nonRegistered
           };
-      }).sort((a, b) => b.active - a.active); // Sort by active count
+      }).sort((a, b) => b.totalParticipants - a.totalParticipants); // Sort by total participation
 
       // Voter Registration Status
       const voterStats = participants.reduce((acc, p) => {
@@ -211,73 +236,299 @@ export class PdfService {
       });
 
       // Calculate Overall Coverage
-      // Use the sum of the breakdown coverage for consistency
-      const totalActiveInScope = coverageData.reduce((sum, d) => sum + d.active, 0);
-      const totalCentersInScope = coverageData.reduce((sum, d) => sum + d.total, 0);
+      const totalActiveInScope = combinedData.reduce((sum, d) => sum + d.activeCenters, 0);
+      const totalCentersInScope = combinedData.reduce((sum, d) => sum + d.totalCenters, 0);
       
       const overallCoverage = {
         active: totalActiveInScope,
         total: totalCentersInScope,
         rate: totalCentersInScope > 0 ? Math.round((totalActiveInScope / totalCentersInScope) * 100) : 0
       };
-      const htmlContent = await this.generateHtml(
-        event, 
-        {
-          checkedIn: checkedInCount,
-          gender: genderStats,
-          age: ageStats,
-          subjurisdiction: { label: subjurisdictionLabel, data: coverageData },
-          voterStatus: voterStats,
-          coverage: overallCoverage
-        }
-      );
 
-      // 4. Browserless PDF Generation
-      logger.info('Connecting to Browserless...');
-      const browserlessUrl = 'wss://production-sfo.browserless.io?token=2TWhMjjwY2OITnpf9f3886140c278370a3319ac18cb3aa3df';
-      
-      browser = await puppeteer.connect({ 
-        browserWSEndpoint: browserlessUrl,
-        defaultViewport: {
-          width: 1200,
-          height: 1600,
-          deviceScaleFactor: 2, // High resolution for sharper charts
-          isMobile: false
+      return {
+          event,
+          stats: {
+            checkedIn: checkedInCount,
+            gender: genderStats,
+            age: ageStats,
+            subjurisdiction: { label: subjurisdictionLabel, data: combinedData },
+            voterStatus: voterStats,
+            coverage: overallCoverage,
+            logoUrl: await this.getLogoDataUrl()
+          }
+      };
+  }
+
+  public async getGlobalAnalytics(): Promise<{ stats: any }> {
+    const participantRepository = AppDataSource.getRepository(Participant);
+    const checkInLogRepository = AppDataSource.getRepository(CheckInLog);
+    const pollingCenterRepository = AppDataSource.getRepository(PollingCenter);
+
+    // 1. Fetch ALL checked-in participants across ALL events
+    const checkIns = await checkInLogRepository.find({
+        relations: ['participant']
+    });
+
+    const checkedInParticipantIds = new Set(checkIns.map(c => c.participant.id));
+    
+    // Fetch all participants
+    const allParticipants = await participantRepository.find();
+    const checkedInParticipants = allParticipants.filter(p => checkedInParticipantIds.has(p.id));
+
+    // 2. Aggregate Data Globally
+    // User wants ALL participants in the database (e.g. 31), not just those who checked in.
+    const totalUniqueParticipants = allParticipants.length;
+
+    // Demographics with Normalization
+    const genderStats = allParticipants.reduce((acc, p) => {
+        let gender = (p.sex || 'NOT STATED').trim().toUpperCase();
+        if (gender === 'M') gender = 'MALE';
+        if (gender === 'F') gender = 'FEMALE';
+        
+        acc[gender] = (acc[gender] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
+
+    // Age
+    const ageStatsUnsorted = allParticipants.reduce((acc, p) => {
+        const age = this.calculateAge(p.dateOfBirth);
+        if (age !== null && age < 18) return acc;
+        const group = this.getAgeGroup(age);
+        acc[group] = (acc[group] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
+
+    const ageOrder = ['18-27', '27-35', '35-50', '50-64', '65+', 'NOT STATED'];
+    const ageStats: Record<string, number> = {};
+    ageOrder.forEach(key => {
+        if (ageStatsUnsorted[key]) {
+            ageStats[key] = ageStatsUnsorted[key];
         }
-      });
+    });
+
+    // 3. County Breakdown & Coverage Logic
+    
+    // Step A: Build Baseline of Total Centers per County
+    const allPollingCenters = await pollingCenterRepository.find();
+    // Map: CountyName -> Total Centers Count
+    const countyTotalCentersMap = new Map<string, number>();
+    
+    allPollingCenters.forEach(pc => {
+        const county = pc.county_name || 'Unassigned';
+        countyTotalCentersMap.set(county, (countyTotalCentersMap.get(county) || 0) + 1);
+    });
+
+    // Step B: Calculate Active Centers (Unique by Name+Ward+Const+County) & Participant Counts
+    const countyActivityMap = new Map<string, { 
+        participants: number, 
+        registered: number, 
+        nonRegistered: number,
+        activeCenters: Set<string> 
+    }>();
+
+    allParticipants.forEach(p => {
+        const county = p.county || 'Unregistered'; 
+        
+        if (!countyActivityMap.has(county)) {
+            countyActivityMap.set(county, { 
+                participants: 0, 
+                registered: 0, 
+                nonRegistered: 0,
+                activeCenters: new Set() 
+            });
+        }
+        
+        const stats = countyActivityMap.get(county)!;
+        stats.participants++;
+        
+        // Track unique active centers for ALL participants in scope
+        if (p.pollingCenter) {
+            const uniqueKey = `${p.pollingCenter}|${p.ward || ''}|${p.constituency || ''}|${p.county || ''}`;
+            stats.activeCenters.add(uniqueKey);
+        }
+
+        if (county !== 'Unregistered') {
+             stats.registered++;
+        } else {
+             stats.nonRegistered++;
+        }
+    });
+
+    // Step C: Construct Final Breakdown Data
+    // We only care about counties that have activity (participants > 0)
+    // "Unregistered" group has no coverage logic
+    
+    let globalActiveCentersCount = 0;
+    let globalTotalCentersInScopeCount = 0;
+
+    const countyData = Array.from(countyActivityMap.entries()).map(([name, stats]) => {
+        let totalCenters = 0;
+        let activeCentersCount = 0;
+        let coverageRate = 0;
+
+        if (name !== 'Unregistered') {
+            totalCenters = countyTotalCentersMap.get(name) || 0;
+            activeCentersCount = stats.activeCenters.size;
+            
+            // Per User Requirement: Coverage is Active / Total for that county
+            coverageRate = totalCenters > 0 ? Math.round((activeCentersCount / totalCenters) * 100) : 0;
+
+            // Add to Global Scope Sums
+            // "if we have covered two counties, we sum the number of polling centers from this two counties"
+            globalActiveCentersCount += activeCentersCount;
+            globalTotalCentersInScopeCount += totalCenters;
+        }
+
+        return {
+            name,
+            totalParticipants: stats.participants,
+            registered: stats.registered,
+            nonRegistered: stats.nonRegistered,
+            totalCenters: totalCenters,
+            activeCenters: activeCentersCount, 
+            coverageRate: coverageRate 
+        };
+    }).sort((a, b) => b.totalParticipants - a.totalParticipants);
+
+    // Global Coverage Rate Calculation
+    // Rate = (Sum of Active Centers in Active Counties) / (Sum of Total Centers in Active Counties)
+    const globalCoverageRate = globalTotalCentersInScopeCount > 0 
+        ? Math.round((globalActiveCentersCount / globalTotalCentersInScopeCount) * 100) 
+        : 0;
+
+    // Count Active Counties (excluding 'Unregistered')
+    const activeCountiesCount = Array.from(countyActivityMap.keys()).filter(c => c !== 'Unregistered').length;
+    // Total Counties could be 47 or just the ones in scope? 
+    // Usually "Coverage" implies "How much of Kenya did we cover?". 
+    // BUT user said: "sum polling centers from these two counties and that is what we get our coverage from"
+    // This implies the specific "Polling Center Coverage Rate" metric is bounded by the active counties.
+    // However, the dashboard might also want to show simple "Counties Active / 47".
+    // I will return the generic 'active/total' structure, where rate is the requested PC-based rate.
+    
+    return {
+        stats: {
+            checkedIn: totalUniqueParticipants,
+            coverage: {
+                rate: globalCoverageRate,
+                active: globalActiveCentersCount,
+                total: globalTotalCentersInScopeCount,
+                activeCenters: globalActiveCentersCount,
+                totalCenters: globalTotalCentersInScopeCount,
+                activeCounties: activeCountiesCount,
+                totalCounties: 47 
+            },
+            gender: genderStats,
+            age: ageStats,
+            voterStatus: {
+                registered: { checkedIn: allParticipants.filter(p => !!p.county).length },
+                nonRegistered: { checkedIn: allParticipants.filter(p => !p.county).length }
+            },
+            subjurisdiction: {
+                label: 'County',
+                data: countyData
+            },
+            logoUrl: await this.getLogoDataUrl()
+        }
+    };
+  }
+
+  public async generateGlobalReport(token?: string): Promise<Buffer> {
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+      const reportUrl = `${baseUrl}/reports/global?token=${token || ''}`;
+      logger.info(`Generating Global Report from: ${reportUrl}`);
+      return this.generatePdfFromUrl(reportUrl);
+  }
+
+  async generateEventReport(eventId: string, token?: string): Promise<Buffer> {
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+      const reportUrl = `${baseUrl}/reports/event/${eventId}?token=${token || ''}`;
+      logger.info(`Generating Event Report from: ${reportUrl}`);
+      return this.generatePdfFromUrl(reportUrl);
+  }
+
+  private async generatePdfFromUrl(targetUrl: string): Promise<Buffer> {
+    let browser;
+    try {
+      logger.info(`Navigating to report URL: ${targetUrl}`);
+
+      // Puppeteer Setup (Local vs Remote)
+      const isDevelopment = process.env.NODE_ENV !== 'production';
+      
+      if (isDevelopment) {
+          logger.info('Launching Local Puppeteer (Development Mode)...');
+          browser = await puppeteer.launch({
+              headless: true,
+              args: ['--no-sandbox', '--disable-setuid-sandbox'],
+              defaultViewport: {
+                width: 1400,
+                height: 900,
+                deviceScaleFactor: 2
+            }
+          });
+      } else {
+          logger.info('Connecting to Remote Browserless (Production Mode)...');
+          const browserlessUrl = 'wss://production-sfo.browserless.io?token=2TWhMjjwY2OITnpf9f3886140c278370a3319ac18cb3aa3df';
+          browser = await puppeteer.connect({ 
+             browserWSEndpoint: browserlessUrl,
+             defaultViewport: {
+                 width: 1400, 
+                 height: 900,
+                 deviceScaleFactor: 2
+             }
+           });
+      }
 
       const page = await browser.newPage();
       
-      // Improve rendering reliability - use 'load' instead of 'networkidle0' to avoid race conditions
-      await page.setContent(htmlContent, { 
-        waitUntil: 'load',
-        timeout: 60000 
+      // Attach Debug Loggers
+      page.on('console', msg => logger.info(`[Browser Console]: ${msg.text()}`));
+      page.on('pageerror', (err: any) => logger.error(`[Browser Error]: ${err.message}`));
+      page.on('requestfailed', request => {
+        logger.error(`[Browser Network Fail]: ${request.url()} - ${request.failure()?.errorText}`);
       });
-      
-      // Wait for Chart.js animation
-      await new Promise(r => setTimeout(r, 2000));
 
+      // Navigate
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      
+      // Wait for the specific container
+      // Note: Both Global and Event reports must use this ID request-page-1 for waiting
+      try {
+          await page.waitForSelector('#report-page-1', { timeout: 30000 });
+      } catch (e) {
+          logger.warn('Timed out waiting for #report-page-1, trying to print anyway...');
+      }
+      
+      // Small delay for Chart animations
+      await new Promise(r => setTimeout(r, 1000));
+
+
+      // 5. Generate PDF
       const pdfBuffer = await page.pdf({
         format: 'A4',
-        landscape: true, // Landscape for Dashboard view
+        landscape: true,
         printBackground: true,
-        margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' }, // Smaller margins for dashboard
+        margin: {
+          top: '0px',
+          bottom: '0px',
+          left: '0px',
+          right: '0px'
+        }
       });
 
-      logger.info('PDF successfully generated via Browserless');
-      // cast to Buffer because puppeteer-core types might return Uint8Array
       return Buffer.from(pdfBuffer);
-
     } catch (error) {
-      logger.error('PDF Generation Failed', { 
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined 
-      });
+      logger.error('Error generating PDF:', error);
       throw error;
     } finally {
-      if (browser) await browser.close();
+      if (browser) {
+        await browser.close();
+      }
     }
   }
+      
+
+
+
 
   private async generateHtml(event: Event, stats: any): Promise<string> {
     const logoDataUrl = await this.getLogoDataUrl();
@@ -582,20 +833,10 @@ export class PdfService {
         const donutConfig = {
             responsive: true,
             maintainAspectRatio: false,
-            cutout: '60%',
-            layout: { padding: 10 },
+            cutout: '70%',
             plugins: {
-                legend: { 
-                    display: true, 
-                    position: 'bottom',
-                    labels: { boxWidth: 8, padding: 10, font: { size: 10 } }
-                },
-                datalabels: { 
-                    display: true,
-                    color: '#FFFFFF',
-                    font: { weight: 'bold', size: 11 },
-                    formatter: (val) => val // Show the number
-                } 
+                legend: { display: false },
+                datalabels: { display: false }
             }
         };
 

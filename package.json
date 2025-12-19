@@ -27,6 +27,7 @@
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.6.5",
     "nodemailer": "^7.0.10",
+    "puppeteer": "^24.34.0",
     "puppeteer-core": "^24.33.1",
     "reflect-metadata": "^0.1.13",
     "typeorm": "^0.3.17",

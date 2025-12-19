@@ -664,6 +664,24 @@ router.get(
   }
 );
 
+// Get Event Analytics (For Report Preview)
+router.get(
+  '/:eventId/analytics',
+  authenticate,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { eventId } = req.params;
+      const pdfService = PdfService.getInstance();
+      
+      const analytics = await pdfService.getEventAnalytics(eventId);
+      res.json(analytics);
+    } catch (error) {
+       logger.error('Get event analytics error:', error);
+       res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+);
+
 // Generate Event Report PDF
 router.get(
   '/:eventId/report',
@@ -673,7 +691,8 @@ router.get(
       const { eventId } = req.params;
       const pdfService = PdfService.getInstance();
       
-      const buffer = await pdfService.generateEventReport(eventId);
+      const token = req.headers.authorization?.split(' ')[1];
+      const buffer = await pdfService.generateEventReport(eventId, token);
 
       res.set({
         'Content-Type': 'application/pdf',
@@ -691,6 +710,60 @@ router.get(
     }
   }
 );
+
+// --- GLOBAL REPORT ENDPOINTS ---
+
+// Download Global PDF Report
+router.get(
+  '/reports/global/download',
+  authenticate,
+  requireSuperAdmin,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const pdfService = PdfService.getInstance();
+      
+      // Token for puppeteer authentication
+      const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
+
+      const pdfBuffer = await pdfService.generateGlobalReport(token);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename=Global_National_Report.pdf');
+      res.send(pdfBuffer);
+
+    } catch (error) {
+      logger.error('Generate global report error:', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      res.status(500).json({ message: 'Failed to generate global report' });
+    }
+  }
+);
+
+// Get Global Analytics JSON (For Frontend Page)
+router.get(
+    '/analytics/global',
+    authenticate,
+    requireSuperAdmin,
+    async (req: AuthRequest, res: Response): Promise<void> => {
+      try {
+        const pdfService = PdfService.getInstance();
+        const { stats } = await pdfService.getGlobalAnalytics();
+  
+        res.status(200).json({
+            stats
+        });
+  
+      } catch (error) {
+        logger.error('Get global analytics error:', {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+        res.status(500).json({ message: 'Failed to get global analytics' });
+      }
+    }
+  );
 
 export default router;
 

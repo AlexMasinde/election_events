@@ -254,6 +254,25 @@ export class PdfService {
         rate: totalCentersInScope > 0 ? Math.round((totalActiveInScope / totalCentersInScope) * 100) : 0
       };
 
+      // 4. Staff Performance for this Event
+      const userRepository = AppDataSource.getRepository(User);
+      const users = (await userRepository.find({
+          relations: ['checkInLogs']
+      })).filter(u => u.role !== 'admin' && u.role !== 'super_admin');
+
+      const eventStaffData = users
+          .map(user => {
+              const eventCheckIns = user.checkInLogs?.filter(log => log.eventId === eventId).length || 0;
+              return {
+                  name: user.name,
+                  email: user.email,
+                  checkIns: eventCheckIns,
+                  countiesVisited: eventCheckIns > 0 ? (event.county ? [event.county] : []) : []
+              };
+          })
+          .filter(d => d.checkIns > 0)
+          .sort((a, b) => b.checkIns - a.checkIns);
+
       return {
           event,
           stats: {
@@ -263,6 +282,7 @@ export class PdfService {
             subjurisdiction: { label: subjurisdictionLabel, data: combinedData },
             voterStatus: voterStats,
             coverage: overallCoverage,
+            staff: eventStaffData,
             logoUrl: await this.getLogoDataUrl()
           }
       };
@@ -444,9 +464,10 @@ export class PdfService {
     
     // Fetch all users with their check-in logs and the events associated with those logs
     // Using relations to get the necessary deep data: checkInLogs -> event
-    const users = await userRepository.find({
+    // Exclude admins and super admins
+    const users = (await userRepository.find({
         relations: ['checkInLogs', 'checkInLogs.event']
-    });
+    })).filter(u => u.role !== 'admin' && u.role !== 'super_admin');
 
     const staffData = users.map(user => {
         const checkInCount = user.checkInLogs?.length || 0;

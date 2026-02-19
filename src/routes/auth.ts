@@ -510,5 +510,96 @@ router.delete(
   }
 );
 
+// Reset password (Admin only)
+router.post(
+  '/users/:email/reset-password',
+  authenticate,
+  requireAdmin,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    try {
+      const { email } = req.params;
+
+      if (!email) {
+        res.status(400).json({
+          message: 'Email is required',
+        });
+        return;
+      }
+
+      const userRepository = AppDataSource.getRepository(User);
+
+      // Find user by email
+      const user = await userRepository.findOne({
+        where: { email },
+      });
+
+      if (!user) {
+        res.status(404).json({ message: 'User not found' });
+        return;
+      }
+
+      // Prevent resetting your own password via this endpoint (should use a separate profile update)
+      // Although for admins, maybe it is fine? Let's allow it for now, but usually reset is for others.
+      
+      // Regular admins can only reset users assigned to them
+      const userRole = req.user!.role as string;
+      if (userRole !== UserRole.SUPER_ADMIN && userRole !== 'super_admin') {
+        if (user.adminId !== req.user!.id) {
+          res.status(403).json({ message: 'Access denied. You can only reset passwords for users assigned to you.' });
+          return;
+        }
+      }
+
+      // Generate random password
+      const randomPassword = generateRandomPassword();
+      const hashedPassword = await hashPassword(randomPassword);
+
+      // Update password
+      user.password = hashedPassword;
+      
+      // Revoke all tokens by clearing refresh token
+      user.refreshToken = null;
+      
+      await userRepository.save(user);
+
+      // Send SMS with new credentials
+      const phoneNumber = user.phoneNumber;
+      let smsSent = false;
+      
+      if (phoneNumber) {
+        smsSent = await smsService.sendUserCredentials(
+            phoneNumber,
+            user.email,
+            randomPassword
+        );
+      }
+
+      logger.info('User password reset successfully', {
+        email,
+        resetBy: req.user!.id,
+        smsSent
+      });
+
+      if (smsSent) {
+          res.json({
+            message: 'Password reset successfully. New credentials have been sent to the user\'s phone number.',
+          });
+      } else {
+          res.json({
+            message: 'Password reset successfully, but failed to send SMS (or no phone number). Please provide the new password manually.',
+            password: randomPassword
+          });
+      }
+
+    } catch (error) {
+      logger.error('Reset password error:', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+);
+
 export default router;
 

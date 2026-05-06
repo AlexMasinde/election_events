@@ -5,7 +5,7 @@ import { Participant } from '../entities/Participant';
 import { CheckInLog } from '../entities/CheckInLog';
 import { User, UserRole } from '../entities/User';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { lookupVoter } from '../services/voterLookup';
+import { lookupVoter, RegistrationStatus } from '../services/voterLookup';
 import logger from '../config/logger';
 
 const router = Router();
@@ -88,15 +88,17 @@ router.post(
           return;
         }
 
-        // Extra guard: if event is restricted to a polling center, enforce it strictly
+        // If event is restricted to a polling center, do NOT hide registered voters outside it.
+        // Instead, downgrade them to "outside jurisdiction" so UI can show where they are registered.
         if (
           event.pollingCenter &&
           voterInfo.pollingCenter &&
           voterInfo.pollingCenter.trim().toLowerCase() !==
-            event.pollingCenter.trim().toLowerCase()
+            event.pollingCenter.trim().toLowerCase() &&
+          voterInfo.registrationStatus === RegistrationStatus.VALID_JURISDICTION
         ) {
-          res.status(404).json({ message: 'Participant not found' });
-          return;
+          voterInfo.registrationStatus =
+            RegistrationStatus.REGISTERED_OUTSIDE_JURISDICTION;
         }
 
         res.json({

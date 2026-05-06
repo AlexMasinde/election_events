@@ -31,23 +31,20 @@ class SmsService {
     return formattedMobileNumber;
   }
 
-  async sendUserCredentials(phoneNumber: string, email: string, password: string): Promise<boolean> {
+  private async sendMessage(phoneNumber: string, message: string): Promise<boolean> {
     try {
       const sanitized = this.sanitizePhoneNumber(phoneNumber);
-      
+
       if (typeof sanitized === 'object' && 'error' in sanitized) {
         logger.error('Invalid phone number for SMS:', { phoneNumber, error: sanitized.error });
         return false;
       }
 
-      const message = `Welcome to UDA Events! Your account has been created.\nEmail: ${email}\nPassword: ${password}`;
-      
       const url = `https://api.smsleopard.com/v1/sms/send?message=${encodeURIComponent(message)}&source=${this.source}&username=${this.username}&password=${encodeURIComponent(this.password)}&destination=${sanitized}`;
 
-      logger.info('Sending SMS via URL:', { url: url.replace(this.password, '***') }); // Log URL with masked password
-
+      logger.info('Sending SMS via URL:', { url: url.replace(this.password, '***') });
       await axios.get(url);
-      
+
       logger.info('SMS sent successfully', { phoneNumber: sanitized });
       return true;
     } catch (error) {
@@ -57,6 +54,25 @@ class SmsService {
       });
       return false;
     }
+  }
+
+  async sendUserCredentials(phoneNumber: string, email: string, password: string): Promise<boolean> {
+    try {
+      const message = `Welcome to UDA Events! Your account has been created.\nEmail: ${email}\nPassword: ${password}`;
+      return await this.sendMessage(phoneNumber, message);
+    } catch (error) {
+      logger.error('Error sending SMS:', {
+        error: error instanceof Error ? error.message : String(error),
+        phoneNumber,
+      });
+      return false;
+    }
+  }
+
+  async sendAssignmentNotification(phoneNumber: string, jurisdictionName: string, jurisdictionType: string): Promise<boolean> {
+    const suffix = jurisdictionType ? ` ${jurisdictionType}` : '';
+    const message = `You have been assigned to ${jurisdictionName}${suffix}.`;
+    return this.sendMessage(phoneNumber, message);
   }
 }
 

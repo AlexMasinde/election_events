@@ -9,8 +9,17 @@ import { In } from 'typeorm';
 import { authenticate, AuthRequest, requireAdmin, requireSuperAdmin } from '../middleware/auth';
 import logger from '../config/logger';
 import { PdfService } from '../services/PdfService';
+import { smsService } from '../services/sms';
 
 const router = Router();
+
+function getJurisdictionLabel(event: Event): { name: string; type: string } {
+  if (event.pollingCenter) return { name: event.pollingCenter, type: 'Polling Center' };
+  if (event.ward) return { name: event.ward, type: 'Ward' };
+  if (event.constituency) return { name: event.constituency, type: 'Constituency' };
+  if (event.county) return { name: event.county, type: 'County' };
+  return { name: 'National', type: '' };
+}
 
 // Create event (Admin only)
 router.post(
@@ -99,9 +108,19 @@ router.post(
         id: In(userIds),
       });
 
+      const previouslyAssignedIds = new Set((event.assignedUsers || []).map((u) => u.id));
+
       // Update assigned users
       event.assignedUsers = usersToAssign;
       await eventRepository.save(event);
+
+      // Notify newly assigned users via SMS
+      const { name: jurisdictionName, type: jurisdictionType } = getJurisdictionLabel(event);
+      const newlyAssigned = usersToAssign.filter((u) => !previouslyAssignedIds.has(u.id));
+      for (const u of newlyAssigned) {
+        if (!u.phoneNumber) continue;
+        await smsService.sendAssignmentNotification(u.phoneNumber, jurisdictionName, jurisdictionType);
+      }
 
       res.json({
         message: 'Users assigned to event successfully',
@@ -113,6 +132,208 @@ router.post(
         stack: error instanceof Error ? error.stack : undefined,
       });
       res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+);
+
+// Bulk assign users to events (Super Admin only)
+// Batch builder payload: assignments[] of { eventId, userIds }, with mode: replace | add | remove
+router.post(
+  '/assign/bulk',
+  authenticate,
+  requireSuperAdmin,
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    const queryRunner = AppDataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const {
+        assignments,
+        mode,
+      }: {
+        assignments?: Array<{ eventId: string; userIds: string[] }>;
+        mode?: 'replace' | 'add' | 'remove';
+      } = req.body;
+
+      if (!assignments || !Array.isArray(assignments) || assignments.length === 0) {
+        res.status(400).json({ message: 'assignments array is required' });
+        return;
+      }
+
+      const action: 'replace' | 'add' | 'remove' = mode || 'replace';
+      if (!['replace', 'add', 'remove'].includes(action)) {
+        res.status(400).json({ message: 'mode must be one of replace | add | remove' });
+        return;
+      }
+
+      const eventRepository = queryRunner.manager.getRepository(Event);
+      const userRepository = queryRunner.manager.getRepository(User);
+
+      // Normalize + dedupe assignments by eventId (last write wins)
+      const assignmentByEventId = new Map<string, string[]>();
+      for (const a of assignments) {
+        if (!a?.eventId || !Array.isArray(a.userIds)) continue;
+        assignmentByEventId.set(a.eventId, a.userIds);
+      }
+
+      const targetEventIds = Array.from(assignmentByEventId.keys());
+      if (targetEventIds.length === 0) {
+        res.status(400).json({ message: 'No valid assignments provided' });
+        return;
+      }
+
+      // Resolve events that exist
+      const existingEvents = await eventRepository.find({
+        select: ['eventId', 'county', 'constituency', 'ward', 'pollingCenter'],
+        where: { eventId: In(targetEventIds) },
+      });
+      const eventById = new Map(existingEvents.map((e) => [e.eventId, e]));
+
+      const resolvedEventIds = existingEvents.map((e) => e.eventId);
+      if (resolvedEventIds.length === 0) {
+        res.status(400).json({ message: 'No matching events found for assignments' });
+        return;
+      }
+
+      // Resolve all referenced users (ignore unknown IDs)
+      const allUserIds = Array.from(
+        new Set(
+          resolvedEventIds.flatMap((eventId) => {
+            const ids = assignmentByEventId.get(eventId) || [];
+            return ids.filter(Boolean);
+          }),
+        ),
+      );
+
+      const resolvedUsers = allUserIds.length ? await userRepository.findBy({ id: In(allUserIds) }) : [];
+      const userById = new Map(resolvedUsers.map((u) => [u.id, u]));
+
+      // Preload assignment state for diff + SMS (for add/replace)
+      const existingPairsRows =
+        action === 'remove' || allUserIds.length === 0
+          ? ([] as Array<{ eventId: string; userId: string }>)
+          : await queryRunner.manager
+              .createQueryBuilder()
+              .select('ue.eventId', 'eventId')
+              .addSelect('ue.userId', 'userId')
+              .from('users_events', 'ue')
+              .where('ue.eventId IN (:...eventIds)', { eventIds: resolvedEventIds })
+              .andWhere('ue.userId IN (:...userIds)', { userIds: Array.from(userById.keys()) })
+              .getRawMany<{ eventId: string; userId: string }>();
+
+      const existingPairSet = new Set(existingPairsRows.map((r) => `${r.eventId}:${r.userId}`));
+
+      const chunk = <T,>(arr: T[], size: number) => {
+        const out: T[][] = [];
+        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+        return out;
+      };
+
+      let deleted = 0;
+      let inserted = 0;
+      const newlyAssignedPairs: Array<{ eventId: string; userId: string }> = [];
+      const perEventResults: Array<{ eventId: string; inserted: number; deleted: number; requestedUsers: number; resolvedUsers: number }> = [];
+
+      for (const eventId of resolvedEventIds) {
+        const requestedUserIds = assignmentByEventId.get(eventId) || [];
+        const resolvedUserIdsForEvent = requestedUserIds.filter((id) => userById.has(id));
+
+        let deletedForEvent = 0;
+        let insertedForEvent = 0;
+
+        if (action === 'replace') {
+          const delRes = await queryRunner.manager
+            .createQueryBuilder()
+            .delete()
+            .from('users_events')
+            .where('eventId = :eventId', { eventId })
+            .execute();
+          deletedForEvent = delRes.affected || 0;
+
+          const allPairs = resolvedUserIdsForEvent.map((userId) => ({ eventId, userId }));
+          for (const p of allPairs) {
+            if (!existingPairSet.has(`${p.eventId}:${p.userId}`)) newlyAssignedPairs.push(p);
+          }
+
+          for (const valuesChunk of chunk(allPairs, 1000)) {
+            const insRes = await queryRunner.manager
+              .createQueryBuilder()
+              .insert()
+              .into('users_events')
+              .values(valuesChunk)
+              .orIgnore()
+              .execute();
+            insertedForEvent += insRes.identifiers.length;
+          }
+        } else if (action === 'add') {
+          const allPairs = resolvedUserIdsForEvent.map((userId) => ({ eventId, userId }));
+          for (const p of allPairs) {
+            if (!existingPairSet.has(`${p.eventId}:${p.userId}`)) newlyAssignedPairs.push(p);
+          }
+          for (const valuesChunk of chunk(allPairs, 1000)) {
+            const insRes = await queryRunner.manager
+              .createQueryBuilder()
+              .insert()
+              .into('users_events')
+              .values(valuesChunk)
+              .orIgnore()
+              .execute();
+            insertedForEvent += insRes.identifiers.length;
+          }
+        } else if (action === 'remove') {
+          const delRes = await queryRunner.manager
+            .createQueryBuilder()
+            .delete()
+            .from('users_events')
+            .where('eventId = :eventId', { eventId })
+            .andWhere('userId IN (:...userIds)', { userIds: resolvedUserIdsForEvent })
+            .execute();
+          deletedForEvent = delRes.affected || 0;
+        }
+
+        inserted += insertedForEvent;
+        deleted += deletedForEvent;
+        perEventResults.push({
+          eventId,
+          inserted: insertedForEvent,
+          deleted: deletedForEvent,
+          requestedUsers: requestedUserIds.length,
+          resolvedUsers: resolvedUserIdsForEvent.length,
+        });
+      }
+
+      // Notify via SMS (best-effort) after DB changes
+      if (action !== 'remove' && newlyAssignedPairs.length > 0) {
+        for (const { eventId, userId } of newlyAssignedPairs) {
+          const u = userById.get(userId);
+          const ev = eventById.get(eventId);
+          if (!u?.phoneNumber || !ev) continue;
+          const { name: jurisdictionName, type: jurisdictionType } = getJurisdictionLabel(ev);
+          await smsService.sendAssignmentNotification(u.phoneNumber, jurisdictionName, jurisdictionType);
+        }
+      }
+
+      await queryRunner.commitTransaction();
+
+      res.json({
+        message: 'Bulk assignment completed',
+        mode: action,
+        matchedEvents: resolvedEventIds.length,
+        matchedUsers: userById.size,
+        inserted,
+        deleted,
+        results: perEventResults,
+      });
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      logger.error('Bulk assign users error:', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      res.status(500).json({ message: 'Internal server error' });
+    } finally {
+      await queryRunner.release();
     }
   }
 );
@@ -130,6 +351,12 @@ router.get(
       const limit = parseInt(req.query.limit as string) || 10;
       const skip = (page - 1) * limit;
 
+      // Optional jurisdiction filters (exact match)
+      const county = (req.query.county as string) || '';
+      const constituency = (req.query.constituency as string) || '';
+      const ward = (req.query.ward as string) || '';
+      const pollingCenter = (req.query.pollingCenter as string) || '';
+
       // Build query based on user role
       let queryBuilder = eventRepository.createQueryBuilder('event')
         .leftJoinAndSelect('event.createdBy', 'createdBy')
@@ -145,34 +372,136 @@ router.get(
           .where('assignedUser.id = :userId', { userId: req.user!.id });
       }
 
+      // Apply jurisdiction filters
+      if (county.trim()) {
+        queryBuilder = queryBuilder.andWhere('event.county = :county', { county: county.trim() });
+      }
+      if (constituency.trim()) {
+        queryBuilder = queryBuilder.andWhere('event.constituency = :constituency', { constituency: constituency.trim() });
+      }
+      if (ward.trim()) {
+        queryBuilder = queryBuilder.andWhere('event.ward = :ward', { ward: ward.trim() });
+      }
+      if (pollingCenter.trim()) {
+        queryBuilder = queryBuilder.andWhere('event.pollingCenter = :pollingCenter', { pollingCenter: pollingCenter.trim() });
+      }
+
       // Get total count
       const total = await queryBuilder.getCount();
 
-      // Get paginated results
-      const events = await queryBuilder
+      // Get paginated results + coverage (registered voters + check-ins)
+      const rawEvents = await queryBuilder
         .skip(skip)
         .take(limit)
-        .getMany();
+        .select([
+          'event.eventId as "eventId"',
+          'event.eventName as "eventName"',
+          'event.county as "county"',
+          'event.constituency as "constituency"',
+          'event.ward as "ward"',
+          'event.pollingCenter as "pollingCenter"',
+          'event.createdAt as "createdAt"',
+          'event.updatedAt as "updatedAt"',
+          'createdBy.id as "createdBy_id"',
+          'createdBy.name as "createdBy_name"',
+          'createdBy.email as "createdBy_email"',
+        ])
+        .addSelect((subQuery) => {
+          return subQuery
+            .select(
+              'COALESCE(SUM(CAST(pc.registered_voters AS UNSIGNED)), 0)',
+              'registered_voters'
+            )
+            .from('polling_centers', 'pc')
+            .where('(event.county IS NULL OR pc.county_name = event.county)')
+            .andWhere(
+              '(event.constituency IS NULL OR pc.constituency_name = event.constituency)'
+            )
+            .andWhere('(event.ward IS NULL OR pc.ward_name = event.ward)')
+            .andWhere(
+              '(event.pollingCenter IS NULL OR pc.polling_center_name = event.pollingCenter)'
+            );
+        }, 'registeredVoters')
+        .addSelect((subQuery) => {
+          return subQuery
+            .select('COUNT(cl.id)', 'checkins')
+            .from('check_in_logs', 'cl')
+            .where('cl.eventId = event.eventId');
+        }, 'totalCheckIns')
+        .getRawMany();
 
       const totalPages = Math.ceil(total / limit);
 
+      // Load assigned users for returned events (single query, grouped in-memory)
+      const eventIds = rawEvents.map((r: any) => r.eventId).filter(Boolean);
+      const assignedUsersByEventId = new Map<
+        string,
+        Array<{ id: string; name: string; email: string; role: string; phoneNumber?: string | null }>
+      >();
+
+      if (eventIds.length > 0) {
+        const assignedRows = await eventRepository
+          .createQueryBuilder('event')
+          .innerJoin('event.assignedUsers', 'u')
+          .select('event.eventId', 'eventId')
+          .addSelect('u.id', 'userId')
+          .addSelect('u.name', 'userName')
+          .addSelect('u.email', 'userEmail')
+          .addSelect('u.role', 'userRole')
+          .addSelect('u.phoneNumber', 'userPhoneNumber')
+          .where('event.eventId IN (:...eventIds)', { eventIds })
+          .orderBy('u.name', 'ASC')
+          .getRawMany<{
+            eventId: string;
+            userId: string;
+            userName: string;
+            userEmail: string;
+            userRole: string;
+            userPhoneNumber?: string | null;
+          }>();
+
+        for (const row of assignedRows) {
+          const list = assignedUsersByEventId.get(row.eventId) || [];
+          list.push({
+            id: row.userId,
+            name: row.userName,
+            email: row.userEmail,
+            role: row.userRole,
+            phoneNumber: row.userPhoneNumber ?? null,
+          });
+          assignedUsersByEventId.set(row.eventId, list);
+        }
+      }
+
       res.json({
         message: 'Events retrieved successfully',
-        events: events.map((event) => ({
-          eventId: event.eventId,
-          eventName: event.eventName,
-          county: event.county || 'UDA HQ',
-          constituency: event.county ? event.constituency : 'HUSTLER PLAZA',
-          ward: event.ward,
-          pollingCenter: event.pollingCenter,
-          createdBy: {
-            id: event.createdBy.id,
-            name: event.createdBy.name,
-            email: event.createdBy.email,
-          },
-          createdAt: event.createdAt,
-          updatedAt: event.updatedAt,
-        })),
+        events: rawEvents.map((row: any) => {
+          const registeredVoters = Number(row.registeredVoters || 0);
+          const totalCheckIns = Number(row.totalCheckIns || 0);
+          const coveragePercentage = registeredVoters > 0 ? (totalCheckIns / registeredVoters) * 100 : 0;
+
+          return {
+            eventId: row.eventId,
+            eventName: row.eventName,
+            county: row.county || 'UDA HQ',
+            constituency: row.county ? row.constituency : 'HUSTLER PLAZA',
+            ward: row.ward,
+            pollingCenter: row.pollingCenter,
+            createdBy: {
+              id: row.createdBy_id,
+              name: row.createdBy_name,
+              email: row.createdBy_email,
+            },
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+            assignedUsers: assignedUsersByEventId.get(row.eventId) || [],
+            coverage: {
+              registeredVoters,
+              totalCheckIns,
+              coveragePercentage,
+            },
+          };
+        }),
         pagination: {
           page,
           limit,

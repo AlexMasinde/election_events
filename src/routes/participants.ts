@@ -88,6 +88,17 @@ router.post(
           return;
         }
 
+        // Extra guard: if event is restricted to a polling center, enforce it strictly
+        if (
+          event.pollingCenter &&
+          voterInfo.pollingCenter &&
+          voterInfo.pollingCenter.trim().toLowerCase() !==
+            event.pollingCenter.trim().toLowerCase()
+        ) {
+          res.status(404).json({ message: 'Participant not found' });
+          return;
+        }
+
         res.json({
           message: 'Participant found',
           participant: voterInfo,

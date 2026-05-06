@@ -5,6 +5,7 @@ interface VoterLookupFilters {
   county?: string;
   constituency?: string;
   ward?: string;
+  pollingCenter?: string;
 }
 
 interface RegisteredVoter {
@@ -68,10 +69,11 @@ export const lookupVoter = async (
 
     // Helper to perform the API call
     const performLookup = async (lookupFilters: VoterLookupFilters) => {
-      const filtersToSend: VoterLookupFilters = {};
+      const filtersToSend: Record<string, string> = {};
       if (lookupFilters.county) filtersToSend.county = lookupFilters.county;
       if (lookupFilters.constituency) filtersToSend.constituency = lookupFilters.constituency;
       if (lookupFilters.ward) filtersToSend.ward = lookupFilters.ward;
+      if (lookupFilters.pollingCenter) filtersToSend.polling_center = lookupFilters.pollingCenter;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -92,7 +94,12 @@ export const lookupVoter = async (
       return (await response.json()) as VoterLookupResponse;
     };
 
-    const hasFilters = !!(filters.county || filters.constituency || filters.ward);
+    const hasFilters = !!(
+      filters.county ||
+      filters.constituency ||
+      filters.ward ||
+      filters.pollingCenter
+    );
 
     // 1. Initial Search (with filters if provided)
     const data = await performLookup(filters);

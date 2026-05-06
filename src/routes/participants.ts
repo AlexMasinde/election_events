@@ -63,6 +63,7 @@ router.post(
         county?: string;
         constituency?: string;
         ward?: string;
+        pollingCenter?: string;
       } = {};
 
       if (event.county) {
@@ -73,6 +74,9 @@ router.post(
       }
       if (event.ward) {
         filters.ward = event.ward;
+      }
+      if (event.pollingCenter) {
+        filters.pollingCenter = event.pollingCenter;
       }
 
       // Lookup voter in external API

@@ -11,6 +11,7 @@ import authRoutes from './routes/auth';
 import eventRoutes from './routes/events';
 import participantRoutes from './routes/participants';
 import analyticsRoutes from './routes/analytics';
+import jurisdictionRoutes from './routes/jurisdiction';
 
 const app = express();
 
@@ -75,6 +76,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/participants', participantRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/jurisdiction', jurisdictionRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

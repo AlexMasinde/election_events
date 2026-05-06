@@ -19,7 +19,7 @@ router.post(
   requireSuperAdmin,
   async (req: AuthRequest, res: Response): Promise<void> => {
     try {
-      const { eventName, county, constituency, ward } = req.body;
+      const { eventName, county, constituency, ward, pollingCenter } = req.body;
 
       if (!eventName) {
         res.status(400).json({
@@ -35,6 +35,7 @@ router.post(
         county: county || null,
         constituency: constituency || null,
         ward: ward || null,
+        pollingCenter: pollingCenter || null,
         createdById: req.user!.id,
       });
 
@@ -48,6 +49,7 @@ router.post(
           county: event.county || 'UDA HQ',
           constituency: event.county ? event.constituency : 'HUSTLER PLAZA',
           ward: event.ward,
+          pollingCenter: event.pollingCenter,
           createdBy: req.user!.id,
           createdAt: event.createdAt,
         },
@@ -162,6 +164,7 @@ router.get(
           county: event.county || 'UDA HQ',
           constituency: event.county ? event.constituency : 'HUSTLER PLAZA',
           ward: event.ward,
+          pollingCenter: event.pollingCenter,
           createdBy: {
             id: event.createdBy.id,
             name: event.createdBy.name,
@@ -236,6 +239,7 @@ router.get(
           county: event.county || 'UDA HQ',
           constituency: event.county ? event.constituency : 'HUSTLER PLAZA',
           ward: event.ward,
+          pollingCenter: event.pollingCenter,
           createdBy: {
             id: event.createdBy.id,
             name: event.createdBy.name,
@@ -356,7 +360,11 @@ router.get(
       let jurisdictionName = 'National';
       let breakdownLevel = 'county';
 
-      if (event.ward) {
+      if (event.pollingCenter) {
+        jurisdictionLevel = 'polling_center';
+        jurisdictionName = event.pollingCenter;
+        breakdownLevel = 'polling_center';
+      } else if (event.ward) {
         jurisdictionLevel = 'ward';
         jurisdictionName = event.ward;
         breakdownLevel = 'polling_center';
@@ -381,6 +389,9 @@ router.get(
       }
       if (event.ward) {
         votersQuery.andWhere('pc.ward_name = :ward', { ward: event.ward });
+      }
+      if (event.pollingCenter) {
+        votersQuery.andWhere('pc.polling_center_name = :pollingCenter', { pollingCenter: event.pollingCenter });
       }
 
       const jurisdictionStats = await votersQuery
@@ -565,7 +576,9 @@ router.get(
       const qb = pollingCenterRepository.createQueryBuilder('pc');
 
       // Filter by Jurisdiction
-      if (event.ward) {
+      if (event.pollingCenter) {
+        qb.andWhere('pc.polling_center_name = :pollingCenter', { pollingCenter: event.pollingCenter });
+      } else if (event.ward) {
         qb.andWhere('pc.ward_name = :ward', { ward: event.ward });
       } else if (event.constituency) {
         qb.andWhere('pc.constituency_name = :constituency', { constituency: event.constituency });

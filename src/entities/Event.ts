@@ -30,6 +30,9 @@ export class Event {
   @Column({ type: 'varchar', length: 255, nullable: true })
   ward: string | null;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  pollingCenter: string | null;
+
   @Column({ type: 'uuid' })
   createdById: string;
 

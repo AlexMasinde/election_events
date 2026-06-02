@@ -424,6 +424,15 @@ router.get(
         }, 'registeredVoters')
         .addSelect((subQuery) => {
           return subQuery
+            .select('COUNT(pc.id)', 'total_centers')
+            .from('polling_centers', 'pc')
+            .where('(event.county IS NULL OR pc.county_name = event.county)')
+            .andWhere('(event.constituency IS NULL OR pc.constituency_name = event.constituency)')
+            .andWhere('(event.ward IS NULL OR pc.ward_name = event.ward)')
+            .andWhere('(event.pollingCenter IS NULL OR pc.polling_center_name = event.pollingCenter)');
+        }, 'totalPollingCenters')
+        .addSelect((subQuery) => {
+          return subQuery
             .select('COUNT(cl.id)', 'checkins')
             .from('check_in_logs', 'cl')
             .where('cl.eventId = event.eventId');
@@ -478,6 +487,7 @@ router.get(
         events: rawEvents.map((row: any) => {
           const registeredVoters = Number(row.registeredVoters || 0);
           const totalCheckIns = Number(row.totalCheckIns || 0);
+          const totalPollingCenters = Number(row.totalPollingCenters || 0);
           const coveragePercentage = registeredVoters > 0 ? (totalCheckIns / registeredVoters) * 100 : 0;
 
           return {
@@ -498,6 +508,7 @@ router.get(
             coverage: {
               registeredVoters,
               totalCheckIns,
+              totalPollingCenters,
               coveragePercentage,
             },
           };
